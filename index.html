@@ -191,6 +191,19 @@
             maxZoom: 18
         });
 
+        // 建立一個全球即時雨量雷達波圖層 (RainViewer API)
+        const rainRadarLayer = L.tileLayer('https://tilecache.rainviewer.com/v2/radar/default/256/{z}/{x}/{y}/1/1_1.png', {
+            attribution: '&copy; RainViewer (即時氣象降雨雷達)',
+            opacity: 0.55
+        });
+
+        // 建立一個台灣鐵路與高鐵路網 WMS 圖層
+        const railwayLayer = L.tileLayer('https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenRailwayMap',
+            maxZoom: 19,
+            opacity: 0.8
+        });
+
         // 初始化地圖 (置中台灣)，預設使用黑金底圖
         const map = L.map('map', {
             zoomControl: true,
@@ -208,7 +221,9 @@
         // 建立一個官方放飛起點圖層組
         const releasePointsGroup = L.layerGroup();
         const overlayMaps = {
-            "⚓ 官方放飛關卡起點": releasePointsGroup
+            "⚓ 官方放飛關卡起點": releasePointsGroup,
+            "🌧️ 全球即時降雨雷達波": rainRadarLayer,
+            "🛤️ 鐵路/高鐵高精度路網": railwayLayer
         };
         
         L.control.layers(baseMaps, overlayMaps, { collapsed: false }).addTo(map);
@@ -627,10 +642,12 @@
 
             document.getElementById('val-device').innerText = deviceId;
             document.getElementById('val-race').innerText = "115D1X";
-            document.getElementById('val-cote').innerText = "8888";
+            document.getElementById('val-cote').innerText = "0703 (頭份大鴻)";
             document.getElementById('val-ring').innerText = deviceId === "G0703-00001" ? "660001" : "660002";
             document.getElementById('val-interval').innerText = "10s";
             document.getElementById('val-mode').innerText = "hybrid";
+
+            const nowSec = Math.floor(Date.now() / 1000);
 
             if (type === 'normal') {
                 document.getElementById('risk-badge').innerText = "低風險 (0%)";
@@ -657,10 +674,39 @@
                     const ratio = i / steps;
                     const noiseLat = (Math.sin(i * 0.2) * 0.04) * (1 - ratio) * ratio;
                     const noiseLng = (Math.cos(i * 0.2) * 0.04) * (1 - ratio) * ratio;
-                    polylinePoints.push([
-                        pointsConfig.start[0] + (pointsConfig.end[0] - pointsConfig.start[0]) * ratio + noiseLat,
-                        pointsConfig.start[1] + (pointsConfig.end[1] - pointsConfig.start[1]) * ratio + noiseLng
-                    ]);
+                    const lat = pointsConfig.start[0] + (pointsConfig.end[0] - pointsConfig.start[0]) * ratio + noiseLat;
+                    const lng = pointsConfig.start[1] + (pointsConfig.end[1] - pointsConfig.start[1]) * ratio + noiseLng;
+                    polylinePoints.push([lat, lng]);
+
+                    // 動態高度與時速
+                    const alt = i === steps ? 20.0 : (i < 5 ? 15.0 + i*40 : Math.round(180 + Math.sin(i*0.1)*50));
+                    const speed = i === steps ? 0.0 : Math.round(65 + Math.sin(i*0.05)*8);
+
+                    // 繪製 CircleMarker
+                    const marker = L.circleMarker([lat, lng], {
+                        radius: 4,
+                        fillColor: "#06b6d4",
+                        color: "#ffffff",
+                        weight: 1,
+                        fillOpacity: 0.9
+                    });
+
+                    const d = new Date((nowSec - (steps - i)*60) * 1000);
+                    const timeStr = d.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+                    const tooltipContent = `
+                        <div class="text-[11px] p-1.5 bg-slate-950 text-slate-100 rounded border border-slate-700/50 min-w-[180px]">
+                            <div class="font-bold border-b border-slate-700 pb-1 mb-1 text-teal-400">📍 [降級/離線] 正常點 #${i+1}</div>
+                            <div class="space-y-0.5">
+                                <div><b>狀態:</b> 🟢 正常飛行</div>
+                                <div><b>時間:</b> ${timeStr}</div>
+                                <div><b>時速:</b> ${speed} km/h</div>
+                                <div><b>高度:</b> ${alt} m (自然高度)</div>
+                                <div><b>衛星:</b> 12 顆 (HDOP: 0.9)</div>
+                            </div>
+                        </div>
+                    `;
+                    marker.bindTooltip(tooltipContent, { direction: "top", sticky: true });
+                    gpsMarkersGroup.addLayer(marker);
                 }
                 
                 pathLine = L.polyline(polylinePoints, {
@@ -709,10 +755,38 @@
                     const ratio = i / steps1;
                     const noiseLat = (Math.sin(i * 0.1) * 0.02) * (1 - ratio) * ratio;
                     const noiseLng = (Math.cos(i * 0.1) * 0.02) * (1 - ratio) * ratio;
-                    route1.push([
-                        pointsConfig.start[0] + (pointsConfig.ab_cote[0] - pointsConfig.start[0]) * ratio + noiseLat,
-                        pointsConfig.start[1] + (pointsConfig.ab_cote[1] - pointsConfig.start[1]) * ratio + noiseLng
-                    ]);
+                    const lat = pointsConfig.start[0] + (pointsConfig.ab_cote[0] - pointsConfig.start[0]) * ratio + noiseLat;
+                    const lng = pointsConfig.start[1] + (pointsConfig.ab_cote[1] - pointsConfig.start[1]) * ratio + noiseLng;
+                    route1.push([lat, lng]);
+
+                    const alt = Math.round(150 + Math.sin(i*0.15)*40);
+                    const speed = Math.round(62 + Math.cos(i*0.08)*5);
+
+                    // 正常飛行點 Marker
+                    const marker = L.circleMarker([lat, lng], {
+                        radius: 4,
+                        fillColor: "#06b6d4",
+                        color: "#ffffff",
+                        weight: 1,
+                        fillOpacity: 0.9
+                    });
+
+                    const d = new Date((nowSec - (steps1 - i + 40)*60) * 1000);
+                    const timeStr = d.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+                    const tooltipContent = `
+                        <div class="text-[11px] p-1.5 bg-slate-950 text-slate-100 rounded border border-slate-700/50 min-w-[180px]">
+                            <div class="font-bold border-b border-slate-700 pb-1 mb-1 text-teal-400">📍 [降級/離線] 正常點 #${i+1}</div>
+                            <div class="space-y-0.5">
+                                <div><b>狀態:</b> 🟢 正常飛行</div>
+                                <div><b>時間:</b> ${timeStr}</div>
+                                <div><b>時速:</b> ${speed} km/h</div>
+                                <div><b>高度:</b> ${alt} m (合理自然高度)</div>
+                                <div><b>衛星:</b> 12 顆 (HDOP: 0.9)</div>
+                            </div>
+                        </div>
+                    `;
+                    marker.bindTooltip(tooltipContent, { direction: "top", sticky: true });
+                    gpsMarkersGroup.addLayer(marker);
                 }
 
                 const route2 = [
@@ -736,6 +810,55 @@
                     dashArray: '5, 8',
                     opacity: 0.9
                 }).addTo(map);
+
+                // 為 route2 加上滯留與陸地超速標記點
+                route2.forEach((coord, i) => {
+                    let fillColor = "#ef4444";
+                    let statusLabel = "🔴 違反防弊規則";
+                    let ruleNotice = "🔴 違反超速防弊核心規則：陸地移動速度 > 90 km/h (實際: 105.4 km/h，高度 52m)";
+                    let alt = 52.0;
+                    let speed = 105.4;
+
+                    if (i === 0) {
+                        fillColor = "#f97316";
+                        statusLabel = "🟠 疑似中途滯留";
+                        ruleNotice = "🟠 疑似中途滯留：在中繼舍停留超過 30 分鐘，可能遭網鴿或人為介入";
+                        alt = 48.0;
+                        speed = 0.2;
+                    } else if (i === route2.length - 1) {
+                        fillColor = "#06b6d4";
+                        statusLabel = "🟢 歸巢降落";
+                        ruleNotice = "🟢 正常低空滑行降落";
+                        alt = 20.0;
+                        speed = 0.0;
+                    }
+
+                    const marker = L.circleMarker(coord, {
+                        radius: 5.5,
+                        fillColor: fillColor,
+                        color: "#ffffff",
+                        weight: 1.5,
+                        fillOpacity: 1.0
+                    });
+
+                    const d = new Date((nowSec - (route2.length - 1 - i)*60) * 1000);
+                    const timeStr = d.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+                    const tooltipContent = `
+                        <div class="text-[11px] p-1.5 bg-slate-950 text-slate-100 rounded border border-slate-700/50 min-w-[200px]">
+                            <div class="font-bold border-b border-slate-700 pb-1 mb-1 text-red-400">📍 [降級/離線] 異常偵測點 #${steps1 + i + 1}</div>
+                            <div class="space-y-0.5">
+                                <div><b>狀態:</b> ${statusLabel}</div>
+                                <div><b>規則:</b> <span class="text-rose-400 font-semibold">${ruleNotice}</span></div>
+                                <div><b>時間:</b> ${timeStr}</div>
+                                <div><b>時速:</b> ${speed} km/h</div>
+                                <div><b>高度:</b> ${alt} m (陸地交通高度)</div>
+                                <div><b>衛星:</b> 14 顆 (HDOP: 0.8)</div>
+                            </div>
+                        </div>
+                    `;
+                    marker.bindTooltip(tooltipContent, { direction: "top", sticky: true });
+                    gpsMarkersGroup.addLayer(marker);
+                });
 
                 const bounds = L.latLngBounds(route1.concat(route2));
                 map.fitBounds(bounds, { padding: [50, 50] });
