@@ -1,12 +1,12 @@
 #!/bin/bash
 # start88 服務快速啟動/重啟指令
-# 版本：v0.2.0 (真實防弊沙盤 - 低頻路廊判定版)
+# 版本：v0.2.1 (真實防弊沙盤 - 上傳抽稀修正版)
 
 PORT_API=8801
 PORT_WEB=8802
 WORKDIR="/home/hi/workspace/gpsring"
-VERSION="v0.2.0"
-TITLE="真實防弊沙盤 - 低頻路廊判定版"
+VERSION="v0.2.1"
+TITLE="真實防弊沙盤 - 上傳抽稀修正版"
 echo "=========================================================="
 echo "      GPS 鴿環專用後台啟動工具 [start88] - Version: ${VERSION}"
 echo "      版名：「${TITLE}」"

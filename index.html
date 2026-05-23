@@ -149,7 +149,10 @@ window.onerror = function(message, source, lineno, colno, error) {
 
                         <!-- 軌跡採樣與互動沙盒 -->
             <div id="sandbox-panel" class="hidden bg-gray-700/30 p-4 rounded-lg border border-gray-700 space-y-3">
-                <h3 class="text-sm font-semibold text-teal-400 border-b border-gray-600 pb-2"><i class="fa-solid fa-flask mr-2"></i> 軌跡採樣與行為互動沙盒</h3>
+                <div class="flex items-center justify-between border-b border-gray-600 pb-2">
+                    <h3 class="text-sm font-semibold text-teal-400"><i class="fa-solid fa-flask mr-2"></i> 軌跡採樣與行為互動沙盒</h3>
+                    <span id="sandbox-badge" class="text-[9px] font-bold px-2 py-0.2 rounded-full bg-slate-950 text-teal-400 border border-teal-800">原始數據</span>
+                </div>
                 <div class="space-y-2">
                     <p class="text-[10px] text-gray-400 leading-tight">調整 GPS 採樣率，即時模擬外包低頻率/高頻率上傳時，防弊引擎的合理性判讀精度：</p>
                     <div class="flex space-x-1.5">
@@ -756,11 +759,15 @@ window.onerror = function(message, source, lineno, colno, error) {
 
         // 互動沙盒防弊評估與渲染引擎 (完美與後端 PFE 鏡像，更增強物理直觀交互)
         function evaluateAndRenderSandbox(fitBounds = false) {
-            // 1. 根據抽稀間隔過濾點位 (抽稀過濾)
+            // 1. 根據實際 timestamp 秒數抽稀。不能用 idx % 30，因為不同 CSV 可能是 10s/60s/300s 一筆。
             let filteredPoints = [];
+            const samplingSeconds = currentSamplingInterval === 1 ? 10 : currentSamplingInterval * 10;
+            let lastKeptTimestamp = null;
             activePoints.forEach((p, idx) => {
-                if (idx % currentSamplingInterval === 0 || idx === activePoints.length - 1) {
+                const ts = parseInt(p.timestamp || 0);
+                if (idx === 0 || idx === activePoints.length - 1 || lastKeptTimestamp === null || (ts - lastKeptTimestamp) >= samplingSeconds) {
                     filteredPoints.push(JSON.parse(JSON.stringify(p))); // 深拷貝
+                    lastKeptTimestamp = ts;
                 }
             });
 
@@ -1040,9 +1047,12 @@ window.onerror = function(message, source, lineno, colno, error) {
                         targetPoint.lng = parseFloat(newLatLng.lng.toFixed(6));
                         console.log(`[DRAGGED] 點位 #${p.seq} 已拖動至: ${targetPoint.lat}, ${targetPoint.lng}`);
                         
-                        // 標記沙盒為已變更
-                        document.getElementById('sandbox-badge').innerText = "沙盒已編輯";
-                        document.getElementById('sandbox-badge').className = "text-[9px] font-bold px-2 py-0.2 rounded-full bg-teal-900/50 text-teal-300 border border-teal-700 animate-pulse";
+                        // 標記沙盒為已變更；正式模式未來可鎖定不可拖曳，這裡先保護 DOM 避免 null error。
+                        const sandboxBadge = document.getElementById('sandbox-badge');
+                        if (sandboxBadge) {
+                            sandboxBadge.innerText = "沙盒已編輯";
+                            sandboxBadge.className = "text-[9px] font-bold px-2 py-0.2 rounded-full bg-teal-900/50 text-teal-300 border border-teal-700 animate-pulse";
+                        }
 
                         evaluateAndRenderSandbox(false); // 即時重繪與重判
                     }
@@ -1079,7 +1089,7 @@ window.onerror = function(message, source, lineno, colno, error) {
                 `;
 
                 marker.bindPopup(popupHtml);
-                marker.bindTooltip(`點 #${p.seq} (${p.speed_kmh} km/h, ${p.alt}m)`, { direction: "top", sticky: true });
+                marker.bindTooltip(`ID:${document.getElementById('val-device')?.innerText || '-'}｜點 #${p.seq}｜${timeStr}｜${p.speed_kmh} km/h｜${p.alt}m｜${statusLabel}${p.rule_code ? '｜' + p.rule_code : ''}`, { direction: "top", sticky: true });
                 gpsMarkersGroup.addLayer(marker);
             });
 
@@ -1100,8 +1110,11 @@ window.onerror = function(message, source, lineno, colno, error) {
                 changeSampling(30);
 
                 // 重置沙盒徽章
-                document.getElementById('sandbox-badge').innerText = "原始數據";
-                document.getElementById('sandbox-badge').className = "text-[9px] font-bold px-2 py-0.2 rounded-full bg-slate-950 text-teal-400 border border-teal-800";
+                const sandboxBadge = document.getElementById('sandbox-badge');
+                if (sandboxBadge) {
+                    sandboxBadge.innerText = "原始數據";
+                    sandboxBadge.className = "text-[9px] font-bold px-2 py-0.2 rounded-full bg-slate-950 text-teal-400 border border-teal-800";
+                }
 
                 evaluateAndRenderSandbox(true);
                 console.log("Sandbox data restored to original successfully.");
@@ -1140,12 +1153,14 @@ async function uploadCSV(event) {
                 const data = await res.json();
 
                 if (res.ok && data.status === "success") {
-                    statusDiv.innerText = `成功！解析 ${data.parsed_rows} 點並載入數據。`;
+                    const loadDevice = data.primary_track_id || device;
+                    const trackSuffix = loadDevice !== device ? `（CSV 內實際 ID: ${loadDevice}）` : "";
+                    statusDiv.innerText = `成功！解析 ${data.parsed_rows} 點，載入 ${loadDevice} ${trackSuffix}。`;
                     statusDiv.className = "text-[10px] text-green-400 font-semibold";
                     
-                    // 自動載入該新增的測試軌跡
+                    // 自動載入 CSV 內實際軌跡 ID；避免表單 device=G0703-TEST，但 CSV id=G0703-CHEATER 時載錯設備。
                     setTimeout(() => {
-                        loadTrack(device, 'normal');
+                        loadTrack(loadDevice, 'normal');
                     }, 1000);
                 } else {
                     statusDiv.innerText = `失敗: ${data.detail || '格式錯誤'}`;
@@ -1164,9 +1179,9 @@ async function uploadCSV(event) {
             GPS鴿環 GIS 系統 &copy; 2026. 苗栗頭份大鴻鴿會 專用防弊系統.
         </div>
         <div class="mt-1 flex justify-center items-center space-x-2 text-teal-400">
-            <span>版本：<span class="font-mono">v0.2.0</span></span>
+            <span>版本：<span class="font-mono">v0.2.1</span></span>
             <span class="text-gray-600">|</span>
-            <span>版名：<span class="font-bold">「真實防弊沙盤 - 低頻路廊判定版」(Realistic Anti-Fraud Sandbox)</span></span>
+            <span>版名：<span class="font-bold">「真實防弊沙盤 - 上傳抽稀修正版」(Realistic Anti-Fraud Sandbox)</span></span>
         </div>
     </footer>
 </body>

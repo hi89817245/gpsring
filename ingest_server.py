@@ -289,11 +289,17 @@ async def upload_csv_tracks(
         content = await file.read()
         decoded = content.decode("utf-8")
         reader = csv.DictReader(io.StringIO(decoded))
+        rows = list(reader)
+        csv_ids = {row.get("id") or row.get("ring_id") for row in rows if (row.get("id") or row.get("ring_id"))}
+        single_track_upload = len(csv_ids) <= 1
         
         grouped_points = {}
-        for row in reader:
+        for row in rows:
             try:
-                pid = row.get("id") or row.get("ring_id") or ring or device
+                # 單一軌跡上傳以表單設備 ID 為準，符合測試者「填哪個 device 就載入哪個」的直覺；
+                # 只有真正多 ID CSV 才保留每列 id/ring_id 做多軌匯入。
+                row_pid = row.get("id") or row.get("ring_id") or ring or device
+                pid = (device or row_pid) if single_track_upload else row_pid
                 
                 pt = GPSPoint(
                     seq=int(row["seq"]),
@@ -333,6 +339,8 @@ async def upload_csv_tracks(
             "message": "Successfully parsed and loaded multi-track CSV into local SQLite/Postgres.",
             "parsed_rows": total_rows,
             "tracks_count": len(grouped_points),
+            "track_ids": list(grouped_points.keys()),
+            "primary_track_id": next(iter(grouped_points.keys())),
             "ingest_result": results
         }
     except Exception as e:
