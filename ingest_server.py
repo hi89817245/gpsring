@@ -3,6 +3,7 @@ import json
 import logging
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import psycopg2
@@ -76,6 +77,19 @@ class IngestPayload(BaseModel):
 # --- 模擬用記憶體儲存 (當無實體資料庫時備用) ---
 MOCK_CONFIGS = {}
 MOCK_TRACK_POINTS = []
+
+# --- 升級：支援前端與靜態網頁合併託管 ---
+@app.get("/", response_class=HTMLResponse)
+def read_root():
+    """提供前端主頁面，實現 Web 與 API 同一 Port 運行"""
+    with open("index.html", "r", encoding="utf-8") as f:
+        return f.read()
+
+@app.get("/index.html", response_class=HTMLResponse)
+def read_index_html():
+    """相容 /index.html 路由"""
+    with open("index.html", "r", encoding="utf-8") as f:
+        return f.read()
 
 # --- 升級：支援 CSV 手動上傳與測試 ---
 from fastapi import UploadFile, File

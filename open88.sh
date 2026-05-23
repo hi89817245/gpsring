@@ -18,31 +18,31 @@ sleep 1
 # 2. 啟動 8801 API Ingestion Server (FastAPI)
 echo "[*] 啟動 8801 API 後台服務..."
 cd ${WORKDIR}
-nohup python3 -m uvicorn ingest_server:app --host 0.0.0.0 --port ${PORT_API} > /tmp/ingest_server.log 2>&1 &
+nohup python3 -m uvicorn ingest_server:app --host 0.0.0.0 --port ${PORT_API} > /tmp/ingest_server_8801.log 2>&1 &
 PID_API=$!
 
-# 3. 啟動 8802 Web 前端 (使用 Python 內建 http.server 綁定 0.0.0.0)
-echo "[*] 啟動 8802 Web 前端地圖模擬服務..."
-nohup python3 -m http.server 8802 --bind 0.0.0.0 > /tmp/web_server.log 2>&1 &
+# 3. 啟動 8802 Web + API 整合服務 (FastAPI)
+echo "[*] 啟動 8802 Web 前端地圖與 API 整合託管服務 (雙港合一)..."
+nohup python3 -m uvicorn ingest_server:app --host 0.0.0.0 --port ${PORT_WEB} > /tmp/ingest_server_8802.log 2>&1 &
 PID_WEB=$!
 
 # 4. 驗證服務
 sleep 2
 echo "------------------------------------------"
 if ps -p $PID_API > /dev/null; then
-    echo "✅ [API 服務] 啟動成功！Port: ${PORT_API} (PID: ${PID_API})"
+    echo "✅ [API 8801 服務] 啟動成功！Port: ${PORT_API} (PID: ${PID_API})"
 else
-    echo "❌ [API 服務] 啟動失敗！請檢查 /tmp/ingest_server.log"
+    echo "❌ [API 8801 服務] 啟動失敗！請檢查 /tmp/ingest_server_8801.log"
 fi
 
 if ps -p $PID_WEB > /dev/null; then
-    echo "✅ [Web 服務] 啟動成功！Port: ${PORT_WEB} (PID: ${PID_WEB})"
+    echo "✅ [Web 8802 整合服務] 啟動成功！Port: ${PORT_WEB} (PID: ${PID_WEB})"
 else
-    echo "❌ [Web 服務] 啟動失敗！請檢查 /tmp/web_server.log"
+    echo "❌ [Web 8802 整合服務] 啟動失敗！請檢查 /tmp/ingest_server_8802.log"
 fi
 echo "------------------------------------------"
 echo "👉 您的實體測試網址與外網 SSL 反代位址："
-echo "   - API 接口：https://gps.xdove.win/api/docs"
-echo "   - 前端地圖：https://gps.xdove.win/index.html"
-echo "   - 本地測試：http://192.168.120.218:${PORT_API}/docs 或 :${PORT_WEB}/index.html"
+echo "   - 整合接口與地圖：https://gps.xdove.win/index.html"
+echo "   - API Swagger 文件：https://gps.xdove.win/docs"
+echo "   - 本地測試：http://192.168.120.218:${PORT_WEB}/index.html"
 echo "=========================================="
