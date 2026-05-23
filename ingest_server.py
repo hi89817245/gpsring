@@ -13,7 +13,7 @@ import io
 import csv
 
 # 初始化 FastAPI app
-app = FastAPI(title="GPS Pigeon Ring Ingestion API", version="1.0.5")
+app = FastAPI(title="GPS Pigeon Ring Ingestion API", version="1.1.0")
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -471,16 +471,19 @@ def get_device_race_tracks(device_id: str, race_id: str):
     conn, engine_type = conn_tuple
     pts = []
     
-    if engine_type == "none" or (engine_type == "sqlite" and check_sqlite_empty(conn, device_id, race_id)):
-        # 如果是 SQLite 且資料庫為空，或者是無可用資料庫，則採取【動態降級範本】保證前台 100% 能演示
-        mode_map = {
-            "G0703-00001": "normal",
-            "G0703-00002": "cheat_highway",
-            "G0703-CHEATER": "cheat_highway",
-            "G0703-AB_COTE": "suspicious_ab",
-            "G0703-HSR": "cheat_hsr"
-        }
-        selected_mode = mode_map.get(device_id, "normal")
+    demo_mode_map = {
+        "G0703-00001": "normal",
+        "G0703-00002": "cheat_highway",
+        "G0703-CHEATER": "cheat_highway",
+        "G0703-AB_COTE": "suspicious_ab",
+        "G0703-HSR": "cheat_hsr",
+        "G0703-FAULT": "gps_fault",
+    }
+    force_demo_template = device_id in demo_mode_map
+
+    if force_demo_template or engine_type == "none" or (engine_type == "sqlite" and check_sqlite_empty(conn, device_id, race_id)):
+        # Demo button 與保底模式一律使用新版真實沙盤範本，避免舊 SQLite 測試資料蓋掉展示結果。
+        selected_mode = demo_mode_map.get(device_id, "normal")
         import train_dataset_generator
         raw_pts = train_dataset_generator.generate_csv_track(selected_mode)
         for p in raw_pts:

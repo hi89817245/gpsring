@@ -124,6 +124,7 @@ window.onerror = function(message, source, lineno, colno, error) {
                             <option value="cheat_highway">高速公路作弊</option>
                             <option value="suspicious_ab">中繼舍停留</option>
                             <option value="cheat_hsr">高鐵極速作弊</option>
+                            <option value="gps_fault">GPS 定位故障</option>
                         </select>
                         <a id="template-link" href="#" download class="text-[10px] text-gray-400 hover:text-teal-300 underline">下載樣板</a>
                     </div>
@@ -152,9 +153,9 @@ window.onerror = function(message, source, lineno, colno, error) {
                 <div class="space-y-2">
                     <p class="text-[10px] text-gray-400 leading-tight">調整 GPS 採樣率，即時模擬外包低頻率/高頻率上傳時，防弊引擎的合理性判讀精度：</p>
                     <div class="flex space-x-1.5">
-                        <button id="btn-sample-1" onclick="changeSampling(1)" class="flex-1 py-1 px-1 bg-teal-800 border border-teal-600 rounded text-[10px] font-bold text-white transition-all">原始 (10s)</button>
+                        <button id="btn-sample-1" onclick="changeSampling(1)" class="flex-1 py-1 px-1 bg-gray-800 border border-gray-700 rounded text-[10px] text-gray-300 hover:text-white transition-all">原始 (10s)</button>
                         <button id="btn-sample-18" onclick="changeSampling(18)" class="flex-1 py-1 px-1 bg-gray-800 border border-gray-700 rounded text-[10px] text-gray-300 hover:text-white transition-all">中頻 (180s)</button>
-                        <button id="btn-sample-30" onclick="changeSampling(30)" class="flex-1 py-1 px-1 bg-gray-800 border border-gray-700 rounded text-[10px] text-gray-300 hover:text-white transition-all">低頻 (300s)</button>
+                        <button id="btn-sample-30" onclick="changeSampling(30)" class="flex-1 py-1 px-1 bg-teal-800 border border-teal-600 rounded text-[10px] font-bold text-white transition-all">低頻 (300s)</button>
                     </div>
                     <div class="text-[9px] text-gray-400 border-t border-gray-700/50 pt-2 leading-tight">
                         💡 <span class="text-teal-300">互動沙盒提示:</span> 地圖上所有定位點皆為<span class="font-semibold text-white">可拖曳 (Draggable)</span> 狀態。試著點選點位、拖拉位置或調整高度，物理引擎將毫秒級重新計算軌跡與作弊嫌疑！
@@ -481,7 +482,7 @@ window.onerror = function(message, source, lineno, colno, error) {
         let pathLine = null;
         let originalPoints = [];         // 最原始 API/Fallback 數據 (重置用)
         let activePoints = [];           // 當前活動/修改後的點位數據
-        let currentSamplingInterval = 1; // 當前採樣頻率 (1=原始, 18=180s, 30=300s)
+        let currentSamplingInterval = 30; // 預設低頻 300s (1=原始, 18=180s, 30=300s)
         let customPoints = [];           // 自建點位數組
         let customMarkersGroup = L.layerGroup().addTo(map); // 自建點圖層組
         let customPolyline = null;       // 自建點折線
@@ -644,7 +645,7 @@ window.onerror = function(message, source, lineno, colno, error) {
             // 保存原始與工作數據
             originalPoints = JSON.parse(JSON.stringify(loadedPoints));
             activePoints = JSON.parse(JSON.stringify(loadedPoints));
-            currentSamplingInterval = 1; // 預設重置為原始 (10s)
+            currentSamplingInterval = 30; // 預設重置為低頻 (300s)
 
             // 顯示沙盒與設備資訊
             document.getElementById('device-info-panel').classList.remove('hidden');
@@ -663,10 +664,11 @@ window.onerror = function(message, source, lineno, colno, error) {
                 "G0703-HSR": "660004"
             };
             document.getElementById('val-ring').innerText = ringMap[deviceId] || "669999";
-            document.getElementById('val-interval').innerText = "10s";
+            document.getElementById('val-interval').innerText = "300s";
             document.getElementById('val-mode').innerText = "hybrid";
 
-            // 渲染與防弊檢測
+            // 渲染與防弊檢測：預設低頻 300s，讓會長先看商用省電模式下能否抓到作弊
+            changeSampling(30);
             evaluateAndRenderSandbox(true); // 首次載入自動適配地圖邊界
         }
 
@@ -689,6 +691,10 @@ window.onerror = function(message, source, lineno, colno, error) {
                 }
             });
 
+            // 更新左側顯示採樣間隔
+            const intervalEl = document.getElementById('val-interval');
+            if (intervalEl) intervalEl.innerText = interval === 1 ? "10s" : (interval === 18 ? "180s" : "300s");
+
             // 執行前端即時防弊與渲染
             evaluateAndRenderSandbox(false); // 抽稀時不重置地圖視角，保持平滑
         }
@@ -710,6 +716,28 @@ window.onerror = function(message, source, lineno, colno, error) {
                     }
                 }
             }
+        }
+
+        const highwayCorridor = [[25.1256,121.7415],[25.0760,121.5170],[25.0640,121.3620],[24.9910,121.3030],[24.9650,121.2180],[24.8420,121.0110],[24.7980,121.0020],[24.6930,120.9080]];
+        const hsrCorridor = [[25.0478,121.5170],[25.0142,121.4635],[25.0137,121.2149],[24.8086,121.0403],[24.6053,120.8258]];
+
+        function pointSegmentDistanceMeters(p, a, b) {
+            const lat0 = ((p[0] + a[0] + b[0]) / 3) * Math.PI / 180;
+            const R = 6371000;
+            const xy = (q) => [q[1] * Math.PI / 180 * Math.cos(lat0) * R, q[0] * Math.PI / 180 * R];
+            const [px, py] = xy(p), [ax, ay] = xy(a), [bx, by] = xy(b);
+            const dx = bx - ax, dy = by - ay;
+            if (dx === 0 && dy === 0) return Math.hypot(px - ax, py - ay);
+            const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
+            return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+        }
+
+        function distanceToCorridorMeters(lat, lng, corridor) {
+            let best = Infinity;
+            for (let i = 0; i < corridor.length - 1; i++) {
+                best = Math.min(best, pointSegmentDistanceMeters([lat, lng], corridor[i], corridor[i + 1]));
+            }
+            return best;
         }
 
         // 拉高度滑桿時，即時更新該點高度，並觸發防弊分析與渲染
@@ -745,58 +773,126 @@ window.onerror = function(message, source, lineno, colno, error) {
             let totalSuspiciousPoints = 0;
             let alerts = [];
 
+            let gpsFaultPoints = 0;
+            let hsrPoints = 0;
+            let highwayPoints = 0;
+            let stationaryRun = 0;
+
             filteredPoints.forEach((p, idx) => {
                 let status = "PASS";
-                let reason = "";
+                let reasons = [];
+                let rules = [];
 
                 if (p.speed_kmh > maxSpeed) maxSpeed = p.speed_kmh;
-                if (p.speed_kmh < 2.0) stationaryCount++;
+                if (p.speed_kmh < 2.0) {
+                    stationaryCount++;
+                    stationaryRun++;
+                } else {
+                    stationaryRun = 0;
+                }
 
-                // 🔴 陸地超速偵測 (時速 > 90 km/h 且高度 < 90m 視為國道坐車作弊)
-                // 💡 物理交互好處：當使用者在線上把這個點的高度 slider 拉到 600m，它就會自動解鎖恢復正常（空中正常飛行時速）！
-                if (p.speed_kmh > 90.0) {
-                    if (p.alt < 90) {
+                const hdop = parseFloat(p.hdop || 0);
+                const sats = parseInt(p.satellites || 0);
+                const prev = filteredPoints[idx - 1];
+                const prevHdop = prev ? parseFloat(prev.hdop || 0) : 0;
+                const prevSats = prev ? parseInt(prev.satellites || 0) : 12;
+                const hwyD = distanceToCorridorMeters(p.lat, p.lng, highwayCorridor);
+                const hsrD = distanceToCorridorMeters(p.lat, p.lng, hsrCorridor);
+                const backendRules = (p.rule_code || p.note || "");
+
+                if (hdop >= 3.5 || sats <= 5 || prevHdop >= 3.5 || prevSats <= 5 || backendRules.includes("GPS-R06")) {
+                    status = "GPS_FAULT";
+                    rules.push("GPS-R06");
+                    reasons.push(`GPS 品質異常：HDOP ${hdop} / 衛星 ${sats}，應先排除定位漂移與相鄰跳點`);
+                    gpsFaultPoints++;
+                } else {
+                    if (p.speed_kmh > 150 || backendRules.includes("GPS-R01")) {
                         status = "CRITICAL_FRAUD";
-                        reason = "違反陸地超速防弊核心規則：移動速度達 " + p.speed_kmh + " km/h，高度 " + p.alt + "m (陸地交通高度)";
-                        totalFraudPoints++;
-                    } else {
-                        status = "PASS"; // 高空高速飛翔 (高山氣流正常)
+                        rules.push("GPS-R01");
+                        reasons.push(`超物理速度 ${p.speed_kmh} km/h`);
+                    } else if (p.speed_kmh > 95) {
+                        status = "SUSPICIOUS";
+                        rules.push("GPS-R01");
+                        reasons.push(`速度偏高 ${p.speed_kmh} km/h`);
+                    }
+
+                    if ((p.speed_kmh >= 72 && p.speed_kmh < 150 && p.alt < 90 && hwyD < 900 && hsrD >= 1200) || backendRules.includes("GPS-R03")) {
+                        status = "CRITICAL_FRAUD";
+                        rules.push("GPS-R02", "GPS-R03");
+                        reasons.push(`貼地高速且距國道/快速道路路廊約 ${hwyD.toFixed(0)}m`);
+                        highwayPoints++;
+                    }
+
+                    if ((p.speed_kmh >= 150 && p.alt < 90 && hsrD < 1200) || backendRules.includes("GPS-R04")) {
+                        status = "CRITICAL_FRAUD";
+                        rules.push("GPS-R04");
+                        reasons.push(`高速段貼近高鐵路廊約 ${hsrD.toFixed(0)}m，疑似台北→苗栗高鐵移動`);
+                        hsrPoints++;
+                    }
+
+                    if (stationaryRun >= 5 || backendRules.includes("GPS-R05")) {
+                        if (status !== "CRITICAL_FRAUD") status = "SUSPICIOUS";
+                        rules.push("GPS-R05");
+                        reasons.push("連續低速滯留，疑似接應/AB 舍停留");
+                        totalSuspiciousPoints++;
                     }
                 }
-                // 🟠 疑似中繼舍滯留偵測 (時速極低且點位聚集)
-                else if (p.speed_kmh < 2.0 && idx >= 60 && idx <= 80) {
-                    status = "SUSPICIOUS";
-                    reason = "中途異常滯留：在中繼舍停留超過 30 分鐘，可能有人為介入、AB 舍裝車嫌疑";
-                    totalSuspiciousPoints++;
-                }
+
+                if (status === "CRITICAL_FRAUD") totalFraudPoints++;
+                else if (status === "SUSPICIOUS") totalSuspiciousPoints++;
 
                 p.status = status;
-                p.anomaly_reason = reason;
+                p.rule_code = [...new Set(rules)].join(",");
+                p.anomaly_reason = reasons.join("；");
             });
 
             // 計算即時風險分數
             let riskScore = 0;
-            if (totalFraudPoints > 0) {
-                riskScore = Math.min(100, 80 + totalFraudPoints * 2);
+            if (hsrPoints > 0) {
+                riskScore = Math.min(100, 90 + hsrPoints * 2);
                 alerts.push({
-                    type: "🔴 陸地交通超速作弊",
+                    type: "🔴 GPS-R04 高鐵路廊重合",
                     level: "CRITICAL",
-                    message: `系統偵測到 ${totalFraudPoints} 個點位在貼地高度 (<90m) 出現超速行駛 (${maxSpeed.toFixed(1)} km/h)！判定坐車無疑。`
+                    message: `低頻 300s 仍偵測到 ${hsrPoints} 個高鐵路廊證據點；原始段符合台北/板橋→苗栗高鐵移動特徵，抽稀後最高視速度 ${maxSpeed.toFixed(1)} km/h。`
+                });
+            }
+            if (highwayPoints > 0) {
+                riskScore = Math.min(100, Math.max(riskScore, 85 + highwayPoints * 2));
+                alerts.push({
+                    type: "🔴 GPS-R02/R03 貼地高速與國道路廊",
+                    level: "CRITICAL",
+                    message: `偵測到 ${highwayPoints} 個點符合基隆接應後沿國道/快速道路南下至頭份的貼地高速特徵。`
+                });
+            }
+            if (totalFraudPoints > 0 && hsrPoints === 0 && highwayPoints === 0) {
+                riskScore = Math.min(100, 75 + totalFraudPoints * 2);
+                alerts.push({
+                    type: "🔴 GPS-R01 超物理速度",
+                    level: "CRITICAL",
+                    message: `偵測到 ${totalFraudPoints} 個點位速度超過賽鴿合理極限，最高 ${maxSpeed.toFixed(1)} km/h。`
                 });
             }
             if (totalSuspiciousPoints > 0) {
                 riskScore = Math.max(riskScore, 45);
                 alerts.push({
-                    type: "🟠 中途滯留嫌疑",
+                    type: "🟠 GPS-R05 中途滯留嫌疑",
                     level: "WARNING",
-                    message: "軌跡存在多處長時間原地靜止/打轉現象，疑似在 A 舍或秘密轉運點停留。"
+                    message: "軌跡存在連續低速停留，需比對是否為接應點、AB 舍或合法等待點。"
+                });
+            }
+            if (gpsFaultPoints > 0) {
+                riskScore = Math.max(riskScore, 25);
+                alerts.push({
+                    type: "🟣 GPS-R06 定位品質異常",
+                    level: "WARNING",
+                    message: `偵測到 ${gpsFaultPoints} 個點 HDOP/衛星數異常，應標為設備/定位疑慮，不直接當作弊。`
                 });
             }
 
             // 更新左側的風險徽章與儀表板
             const riskBadge = document.getElementById('risk-badge');
             const riskBar = document.getElementById('risk-bar');
-            if (riskScore >= 90) {
+            if (riskScore >= 80) {
                 riskBadge.innerText = `高危作弊 (${riskScore}%)`;
                 riskBadge.className = "text-xs font-bold px-2 py-0.5 rounded-full bg-red-900/50 text-red-400 border border-red-700 shadow-md shadow-red-950/20 animate-pulse";
                 riskBar.style.width = `${riskScore}%`;
@@ -889,12 +985,16 @@ window.onerror = function(message, source, lineno, colno, error) {
                 let dash = "";
 
                 if (seg.status === "CRITICAL_FRAUD") {
-                    color = "#ef4444"; // 國道坐車
+                    color = "#ef4444"; // 國道/高鐵坐車
                     weight = 5.0;
                     dash = "5, 8";
                 } else if (seg.status === "SUSPICIOUS") {
                     color = "#f97316"; // 疑似中繼舍滯留
                     weight = 4.0;
+                } else if (seg.status === "GPS_FAULT") {
+                    color = "#a855f7"; // GPS 定位/設備異常
+                    weight = 4.0;
+                    dash = "2, 8";
                 }
 
                 const pl = L.polyline(seg.points, {
@@ -915,6 +1015,7 @@ window.onerror = function(message, source, lineno, colno, error) {
                 let color = "#06b6d4";
                 if (p.status === "CRITICAL_FRAUD") color = "#ef4444";
                 else if (p.status === "SUSPICIOUS") color = "#f97316";
+                else if (p.status === "GPS_FAULT") color = "#a855f7";
 
                 // 使用自訂 SVG 圓點 DivIcon，並保持與地圖完美對齊
                 const icon = L.divIcon({
@@ -949,7 +1050,7 @@ window.onerror = function(message, source, lineno, colno, error) {
 
                 const d = new Date(p.timestamp * 1000);
                 const timeStr = d.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
-                const statusLabel = p.status === "CRITICAL_FRAUD" ? "🔴 坐車作弊" : (p.status === "SUSPICIOUS" ? "🟠 異常滯留" : "🟢 正常飛行");
+                const statusLabel = p.status === "CRITICAL_FRAUD" ? "🔴 交通工具作弊" : (p.status === "SUSPICIOUS" ? "🟠 異常滯留" : (p.status === "GPS_FAULT" ? "🟣 GPS定位疑慮" : "🟢 正常飛行"));
 
                 const popupHtml = `
                     <div class="text-[11px] p-2 bg-slate-950 text-slate-100 rounded border border-slate-700/60 min-w-[210px] space-y-2">
@@ -993,10 +1094,10 @@ window.onerror = function(message, source, lineno, colno, error) {
         function resetSandbox() {
             if (originalPoints.length > 0) {
                 activePoints = JSON.parse(JSON.stringify(originalPoints));
-                currentSamplingInterval = 1;
+                currentSamplingInterval = 30;
                 
                 // 重置抽稀按鈕樣式
-                changeSampling(1);
+                changeSampling(30);
 
                 // 重置沙盒徽章
                 document.getElementById('sandbox-badge').innerText = "原始數據";
@@ -1063,9 +1164,9 @@ async function uploadCSV(event) {
             GPS鴿環 GIS 系統 &copy; 2026. 苗栗頭份大鴻鴿會 專用防弊系統.
         </div>
         <div class="mt-1 flex justify-center items-center space-x-2 text-teal-400">
-            <span>版本：<span class="font-mono">v0.1.5</span></span>
+            <span>版本：<span class="font-mono">v0.2.0</span></span>
             <span class="text-gray-600">|</span>
-            <span>版名：<span class="font-bold">「物理天網 - 邊際極速 SQLite + 行為互動沙盒大升級版」(Physics Skynet Weather Map Upgrade)</span></span>
+            <span>版名：<span class="font-bold">「真實防弊沙盤 - 低頻路廊判定版」(Realistic Anti-Fraud Sandbox)</span></span>
         </div>
     </footer>
 </body>
