@@ -416,6 +416,9 @@
         let originalPoints = [];         // 最原始 API/Fallback 數據 (重置用)
         let activePoints = [];           // 當前活動/修改後的點位數據
         let currentSamplingInterval = 1; // 當前採樣頻率 (1=原始, 18=180s, 30=300s)
+        let customPoints = [];           // 自建點位數組
+        let customMarkersGroup = L.layerGroup().addTo(map); // 自建點圖層組
+        let customPolyline = null;       // 自建點折線
 
         // 載入特定鴿子軌跡數據
         async function loadTrack(deviceId, type) {
