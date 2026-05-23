@@ -86,7 +86,7 @@
                             <option value="suspicious_ab">中繼舍停留</option>
                             <option value="cheat_hsr">高鐵極速作弊</option>
                         </select>
-                        <a id="template-link" href="/templates/template_normal.csv" download class="text-[10px] text-gray-400 hover:text-teal-300 underline">下載樣板</a>
+                        <a id="template-link" href="#" download class="text-[10px] text-gray-400 hover:text-teal-300 underline">下載樣板</a>
                     </div>
                     <form id="csv-upload-form" onsubmit="uploadCSV(event)" class="space-y-2 text-xs">
                         <div class="grid grid-cols-2 gap-1.5">
@@ -387,6 +387,11 @@
                 
             document.getElementById('template-link').href = urlBase;
         }
+
+        // 初始化樣板下載連結
+        window.addEventListener('DOMContentLoaded', () => {
+            updateTemplateLink();
+        });
 
         // 載入特定鴿子軌跡數據
         async function loadTrack(deviceId, type) {
