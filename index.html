@@ -494,34 +494,6 @@
 
                         pathLine = L.layerGroup([p1, p2]).addTo(map);
                     } else {
-                        // 手動上傳的自訂軌跡測試 (動態計算作弊)
-                        let maxSpeed = 0;
-                        let altList = [];
-                        let stationaryCount = 0;
-                        
-                        data.points.forEach((p, idx) => {
-                            if (p.speed_kmh > maxSpeed) maxSpeed = p.speed_kmh;
-                            if (p.speed_kmh < 2.0) stationaryCount++;
-                            altList.push(p.alt);
-                        });
-                        
-                        // 計算作弊判定與嫌疑
-                        let isOverSpeed = maxSpeed > 85.0;
-                        let isHsrSpeed = maxSpeed > 130.0;
-                        let isHighway = false;
-                        
-                        // 簡單的道路貼合模擬（時速在 90-120 之間且高度平緩不變）
-                        let sampleAlt = altList.slice(Math.floor(altList.length * 0.4), Math.floor(altList.length * 0.8));
-                        let altVariance = 0;
-                        if (sampleAlt.length > 1) {
-                            let mean = sampleAlt.reduce((a,b)=>a+b,0) / sampleAlt.length;
-                            let sqDiff = sampleAlt.map(x => Math.pow(x - mean, 2));
-                            altVariance = sqDiff.reduce((a,b)=>a+b,0) / (sampleAlt.length - 1);
-                        }
-                        if (maxSpeed >= 90.0 && altVariance < 15.0) {
-                            isHighway = true;
-                        }
-
                         // 手動上傳的自訂軌跡測試 (動態計算作弊 - 整合後端防弊分析)
                         let maxSpeed = 0;
                         let altList = [];
