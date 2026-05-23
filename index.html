@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPS 鴿環 GIS 軌跡與作弊分析系統</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet GIS Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- FontAwesome 圖示 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col">
+
+    <!-- 頁首 -->
+    <header class="bg-gray-800 border-b border-gray-700 px-6 py-4 flex justify-between items-center">
+        <div class="flex items-center space-x-3">
+            <i class="fa-solid fa-dove text-teal-400 text-2xl"></i>
+            <h1 class="text-xl font-bold tracking-wider">GPS鴿環 (gpsring) <span class="text-teal-400 text-xs px-2 py-0.5 border border-teal-400 rounded-full">DEV PROTO</span></h1>
+        </div>
+        <div class="text-sm text-gray-400 flex items-center space-x-4">
+            <div>
+                首選鴿會: <span class="text-teal-400 font-bold">0703 大鴻鴿會</span>
+            </div>
+            <div>
+                聯機狀態: <span class="text-green-400 font-semibold"><i class="fa-solid fa-circle-dot"></i> Live</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主要內容區 -->
+    <main class="flex-1 flex flex-col md:flex-row">
+        <!-- 側邊欄：控制台與分析面板 -->
+        <section class="w-full md:w-1/3 bg-gray-800 p-6 flex flex-col border-r border-gray-700 space-y-6 overflow-y-auto max-h-[85vh]">
+            
+            <!-- 數據源/模擬 -->
+            <div class="bg-gray-700/50 p-4 rounded-lg border border-gray-600 space-y-3">
+                <h3 class="text-sm font-semibold text-teal-400"><i class="fa-solid fa-gears mr-2"></i> 模擬控制台</h3>
+                <div class="space-y-2">
+                    <p class="text-xs text-gray-300">第一期測試：選擇一隻鴿子進行 GIS 軌跡載入：</p>
+                    <div class="flex space-x-2">
+                        <button onclick="loadTrack('G0703-00001', 'normal')" class="flex-1 py-2 px-3 bg-teal-600 hover:bg-teal-500 rounded text-sm font-semibold transition-all">
+                            <i class="fa-solid fa-dove mr-1"></i> 正常 (00001)
+                        </button>
+                        <button onclick="loadTrack('G0703-00002', 'cheat')" class="flex-1 py-2 px-3 bg-red-600 hover:bg-red-500 rounded text-sm font-semibold transition-all">
+                            <i class="fa-solid fa-truck-monster mr-1"></i> 作弊 (00002)
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="border-t border-gray-600 pt-3 space-y-2">
+                    <div class="flex justify-between items-center">
+                        <h4 class="text-xs font-semibold text-teal-400"><i class="fa-solid fa-file-csv mr-1"></i> 手動測試 CSV 上傳</h4>
+                        <select id="csv-template-mode" onchange="updateTemplateLink()" class="bg-gray-800 border border-gray-600 rounded text-[10px] text-teal-300 p-0.5">
+                            <option value="normal">正常 (Normal)</option>
+                            <option value="cheat_highway">高速公路作弊</option>
+                            <option value="suspicious_ab">中繼舍停留</option>
+                            <option value="cheat_hsr">高鐵極速作弊</option>
+                        </select>
+                        <a id="template-link" href="/templates/template_normal.csv" download class="text-[10px] text-gray-400 hover:text-teal-300 underline">下載樣板</a>
+                    </div>
+                    <form id="csv-upload-form" onsubmit="uploadCSV(event)" class="space-y-2 text-xs">
+                        <div class="grid grid-cols-2 gap-1.5">
+                            <input type="text" id="csv-device" placeholder="設備 ID" value="G0703-TEST" class="bg-gray-800 border border-gray-600 rounded p-1 text-white text-[10px] font-mono">
+                            <input type="text" id="csv-ring" placeholder="腳環 ID" value="669999" class="bg-gray-800 border border-gray-600 rounded p-1 text-white text-[10px] font-mono">
+                            <input type="text" id="csv-race" placeholder="賽事" value="115D1X" class="bg-gray-800 border border-gray-600 rounded p-1 text-white text-[10px] font-mono">
+                            <select id="csv-cote" class="bg-gray-800 border border-gray-600 rounded p-1 text-white text-[10px]">
+                                <option value="0703">0703 大鴻鴿會</option>
+                                <option value="0264">0264 上兆鴿會</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center space-x-1">
+                            <input type="file" id="csv-file" accept=".csv" required class="block w-full text-[10px] text-gray-400 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:bg-gray-600 file:text-white file:hover:bg-gray-500">
+                            <button type="submit" class="py-1 px-2.5 bg-indigo-600 hover:bg-indigo-500 rounded font-semibold text-[10px] shrink-0">上傳</button>
+                        </div>
+                        <div id="csv-upload-status" class="text-[10px] text-gray-400 italic"></div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- 設備參數 -->
+            <div id="device-info-panel" class="hidden bg-gray-700/30 p-4 rounded-lg border border-gray-700 space-y-3">
+                <h3 class="text-sm font-semibold text-gray-300 border-b border-gray-600 pb-2"><i class="fa-solid fa-microchip mr-2"></i> 當前設備與賽事設定</h3>
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                    <div><span class="text-gray-400">設備 ID:</span> <span id="val-device" class="font-mono text-teal-300">-</span></div>
+                    <div><span class="text-gray-400">賽事編號:</span> <span id="val-race" class="font-mono">-</span></div>
+                    <div><span class="text-gray-400">鴿舍編號:</span> <span id="val-cote" class="font-mono">-</span></div>
+                    <div><span class="text-gray-400">鴿子腳環:</span> <span id="val-ring" class="font-mono">-</span></div>
+                    <div><span class="text-gray-400">採樣間隔:</span> <span id="val-interval">-</span></div>
+                    <div><span class="text-gray-400">上報模式:</span> <span id="val-mode" class="px-1.5 py-0.2 bg-teal-900 border border-teal-700 rounded text-[10px]">-</span></div>
+                </div>
+            </div>
+
+            <!-- 作弊風險評估 -->
+            <div id="analysis-panel" class="hidden bg-gray-700/30 p-4 rounded-lg border border-gray-700 space-y-4">
+                <h3 class="text-sm font-semibold text-gray-300 border-b border-gray-600 pb-2"><i class="fa-solid fa-shield-halved mr-2"></i> 軌跡合理性作弊分析</h3>
+                
+                <!-- 風險分數儀表 -->
+                <div class="flex items-center justify-between">
+                    <span class="text-xs text-gray-400">綜合風險評估分數</span>
+                    <span id="risk-badge" class="text-xs font-bold px-2 py-0.5 rounded-full">-</span>
+                </div>
+                <div class="w-full bg-gray-700 rounded-full h-3">
+                    <div id="risk-bar" class="bg-teal-500 h-3 rounded-full transition-all duration-500" style="width: 0%"></div>
+                </div>
+
+                <!-- 關鍵指標 -->
+                <div class="grid grid-cols-2 gap-3 text-center">
+                    <div class="bg-gray-800/80 p-2.5 rounded border border-gray-700">
+                        <div class="text-[10px] text-gray-400 uppercase">最高時速</div>
+                        <div id="val-max-speed" class="text-lg font-bold text-white">- <span class="text-xs">km/h</span></div>
+                    </div>
+                    <div id="stationary-card" class="bg-gray-800/80 p-2.5 rounded border border-gray-700">
+                        <div class="text-[10px] text-gray-400 uppercase">滯留/停留時間</div>
+                        <div id="val-stationary" class="text-lg font-bold text-white">- <span class="text-xs">min</span></div>
+                    </div>
+                </div>
+
+                <!-- 警告事項清單 -->
+                <div class="space-y-2">
+                    <div class="text-xs text-gray-400 font-semibold mb-1">風險偵測事件:</div>
+                    <div id="alert-list" class="space-y-2 text-xs">
+                        <!-- 動態插入 -->
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- 地圖 GIS 顯示區 -->
+        <section class="flex-1 relative min-h-[500px]">
+            <div id="map" class="absolute inset-0 bg-gray-950"></div>
+            
+            <!-- 圖例與地圖控制浮動面板 -->
+            <div class="absolute bottom-6 left-6 z-[1000] bg-gray-950/90 border border-gray-700 p-4 rounded-lg shadow-2xl text-xs space-y-2">
+                <h4 class="font-bold border-b border-gray-800 pb-1 mb-2 text-teal-400"><i class="fa-solid fa-map-location-dot mr-1"></i> GIS 圖例</h4>
+                <div class="flex items-center space-x-2"><span class="w-3 h-3 bg-orange-500 rounded-full inline-block"></span> <span>放鴿起點</span></div>
+                <div class="flex items-center space-x-2"><span class="w-3 h-3 bg-green-500 rounded-full inline-block"></span> <span>正常歸返終點 (鴿舍)</span></div>
+                <div class="flex items-center space-x-2"><span class="w-3 h-3 bg-red-600 rounded-full inline-block"></span> <span>作弊懷疑舍 (AB 舍)</span></div>
+                <div class="flex items-center space-x-2"><span class="w-8 h-1 bg-teal-500 inline-block"></span> <span>正常飛行軌跡</span></div>
+                <div class="flex items-center space-x-2"><span class="w-8 h-1 bg-red-500 inline-block"></span> <span>疑似坐車高速公路段</span></div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 腳本邏輯 -->
+    <script>
+        // 初始化地圖 (置中台灣)
+        const map = L.map('map', {
+            zoomControl: true,
+            maxZoom: 18,
+            minZoom: 7
+        }).setView([24.2, 120.9], 8);
+
+        // 使用黑金色調的 Dark Web Map Tile Layer
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 20
+        }).addTo(map);
+
+        let pathLine = null;
+        let markersGroup = L.layerGroup().addTo(map);
+
+        // 預設標誌性點位 (0703 頭份大鴻鴿會為基準)
+        const pointsConfig = {
+            start: [25.1500, 121.7500],   // 放鴿點 (基隆外海)
+            end: [24.6853, 120.9023],     // 苗栗頭份大鴻鴿會 (田寮永貞宮)
+            ab_cote: [24.8100, 121.0500],  // 新竹/頭份中繼點 AB 舍
+            end_0264: [25.0195, 121.2588]  // 桃園 0264 上兆鴿會
+        };
+
+        // 添加固定點位標記
+        function addFixedMarkers() {
+            markersGroup.clearLayers();
+            
+            // 起點
+            L.circleMarker(pointsConfig.start, {
+                radius: 8,
+                fillColor: "#f97316",
+                color: "#fff",
+                weight: 2,
+                fillOpacity: 0.9
+            }).addTo(markersGroup).bindPopup("<b>放鴿起點 (基隆港外海)</b>");
+
+            // 終點 (0703 大鴻)
+            L.circleMarker(pointsConfig.end, {
+                radius: 8,
+                fillColor: "#22c55e",
+                color: "#fff",
+                weight: 2,
+                fillOpacity: 0.9
+            }).addTo(markersGroup).bindPopup("<b>0703 大鴻鴿會 (頭份田寮永貞宮)</b>");
+
+            // 備用終點 (0264 上兆)
+            L.circleMarker(pointsConfig.end_0264, {
+                radius: 8,
+                fillColor: "#3b82f6",
+                color: "#fff",
+                weight: 2,
+                fillOpacity: 0.7
+            }).addTo(markersGroup).bindPopup("<b>0264 上兆鴿會 (桃園蘆竹大興路)</b>");
+
+            // AB 舍 (懷疑點)
+            L.circleMarker(pointsConfig.ab_cote, {
+                radius: 8,
+                fillColor: "#dc2626",
+                color: "#fff",
+                weight: 2,
+                fillOpacity: 0.9
+            }).addTo(markersGroup).bindPopup("<b>懷疑 AB 中繼舍 (新竹/頭份交界)</b>");
+        }
+
+        // 初始化
+        addFixedMarkers();
+        
+        // --- 升級：支援 NFC 感應 URL 自動跳轉載入 ---
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const deviceParam = urlParams.get('device');
+            if (deviceParam) {
+                console.log(`[NFC TRIGGER] 偵測到 NFC 跳轉設備 ID: ${deviceParam}，自動載入軌跡中...`);
+                // 設定 CSV 上傳預設值
+                document.getElementById('csv-device').value = deviceParam;
+                // 預設載入該 device 數據
+                loadTrack(deviceParam, 'normal');
+            }
+        });
+
+        function updateTemplateLink() {
+            const mode = document.getElementById('csv-template-mode').value;
+            // 指向 API Port 8801 的主機位址，不依賴 8802 本身
+            // 如果當前是 https 協議（例如透過反向代理），API 也使用 https 通訊
+            const apiHost = window.location.hostname === "gps.xdove.win" 
+                ? "https://gps.xdove.win/api" // 如果 Nginx 設定了路徑轉發
+                : `${window.location.protocol}//${window.location.hostname}:8801`;
+            
+            // 統一透過 API Host 獲取樣板，避免發送給 Web 8802
+            const urlBase = window.location.hostname === "gps.xdove.win"
+                ? `https://gps.xdove.win/api/v1/tracks/template/csv?mode=${mode}`
+                : `${apiHost}/api/v1/tracks/template/csv?mode=${mode}`;
+                
+            document.getElementById('template-link').href = urlBase;
+        }
+
+        // 載入特定鴿子軌跡數據
+        async function loadTrack(deviceId, type) {
+            addFixedMarkers(); // 重置
+            if (pathLine) {
+                map.removeLayer(pathLine);
+                pathLine = null;
+            }
+            try {
+                // 指向 API Port 8801
+                const apiHost = window.location.hostname === "gps.xdove.win"
+                    ? "https://gps.xdove.win/api"
+                    : `${window.location.protocol}//${window.location.hostname}:8801`;
+                const res = await fetch(`${apiHost}/api/v1/tracks/${deviceId}/115D1X`);
+                const data = await res.json();
+                
+                if (data.status === "success" && data.points && data.points.length > 0) {
+                    console.log("Loaded live points:", data.points);
+                    
+                    document.getElementById('device-info-panel').classList.remove('hidden');
+                    document.getElementById('analysis-panel').classList.remove('hidden');
+
+                    document.getElementById('val-device').innerText = deviceId;
+                    document.getElementById('val-race').innerText = "115D1X";
+                    document.getElementById('val-cote').innerText = deviceId.includes("0264") ? "0264 (桃園上兆)" : "0703 (頭份大鴻)";
+                    document.getElementById('val-ring').innerText = deviceId === "G0703-00001" ? "660001" : (deviceId === "G0703-00002" ? "660002" : "669999");
+                    document.getElementById('val-interval').innerText = "10s";
+                    document.getElementById('val-mode').innerText = "hybrid";
+
+                    // 轉換數據格式並畫線
+                    const route = data.points.map(p => [p.lat, p.lng]);
+                    
+                    if (deviceId === 'G0703-00001') {
+                        // 正常
+                        document.getElementById('risk-badge').innerText = "低風險 (0%)";
+                        document.getElementById('risk-badge').className = "text-xs font-bold px-2 py-0.5 rounded-full bg-green-900/50 text-green-400 border border-green-700";
+                        document.getElementById('risk-bar').style.width = "0%";
+                        document.getElementById('risk-bar').className = "bg-green-500 h-3 rounded-full transition-all duration-500";
+                        
+                        document.getElementById('val-max-speed').innerHTML = "83.2 <span class='text-xs'>km/h</span>";
+                        document.getElementById('val-stationary').innerHTML = "0.0 <span class='text-xs'>min</span>";
+
+                        document.getElementById('alert-list').innerHTML = `
+                            <div class="flex items-start space-x-2 bg-green-950/20 border border-green-900/50 p-2.5 rounded">
+                                <i class="fa-solid fa-circle-check text-green-500 mt-0.5"></i>
+                                <div>
+                                    <div class="font-bold text-green-400">合規軌跡</div>
+                                    <p class="text-gray-400 mt-0.5">整段軌跡未發現異常，平均時速符合賽鴿自然飛行體能表現。</p>
+                                </div>
+                            </div>
+                        `;
+
+                        pathLine = L.polyline(route, {
+                            color: '#06b6d4',
+                            weight: 3,
+                            opacity: 0.8
+                        }).addTo(map);
+                    } else if (deviceId === 'G0703-00002') {
+                        // 作弊 G0703-00002
+                        document.getElementById('risk-badge').innerText = "高危作弊 (95%)";
+                        document.getElementById('risk-badge').className = "text-xs font-bold px-2 py-0.5 rounded-full bg-red-900/50 text-red-400 border border-red-700";
+                        document.getElementById('risk-bar').style.width = "95%";
+                        document.getElementById('risk-bar').className = "bg-red-500 h-3 rounded-full transition-all duration-500";
+                        
+                        document.getElementById('val-max-speed').innerHTML = "115.0 <span class='text-xs'>km/h</span>";
+                        document.getElementById('val-stationary').innerHTML = "30.0 <span class='text-xs'>min</span>";
+
+                        document.getElementById('alert-list').innerHTML = `
+                            <div class="flex items-start space-x-2 bg-red-950/20 border border-red-900/50 p-2.5 rounded">
+                                <i class="fa-solid fa-triangle-exclamation text-red-500 mt-0.5"></i>
+                                <div>
+                                    <div class="font-bold text-red-400">陸地高速公路貼合 (HIGHWAY_MATCH)</div>
+                                    <p class="text-gray-400 mt-0.5">軌跡長時間與國道一號高度貼合且以 95-115 km/h 移動，高度定為 70m 平緩不變。</p>
+                                </div>
+                            </div>
+                            <div class="flex items-start space-x-2 bg-red-950/20 border border-red-900/50 p-2.5 rounded">
+                                <i class="fa-solid fa-gauge-high text-red-500 mt-0.5"></i>
+                                <div>
+                                    <div class="font-bold text-red-400">不合理飛行速度 (OVER_SPEED)</div>
+                                    <p class="text-gray-400 mt-0.5">最高時速達 115.0 km/h，嚴重超出賽鴿正常生理空速極限 (85 km/h)。</p>
+                                </div>
+                            </div>
+                            <div class="flex items-start space-x-2 bg-orange-950/20 border border-orange-900/50 p-2.5 rounded">
+                                <i class="fa-solid fa-house-laptop text-orange-500 mt-0.5"></i>
+                                <div>
+                                    <div class="font-bold text-orange-400">中繼舍長時滯留 (AB_COTE_STATIONARY)</div>
+                                    <p class="text-gray-400 mt-0.5">賽鴿於台中 AB 中繼舍停留長達 30.0 分鐘，違反正常連續飛行歸巢路徑行為。</p>
+                                </div>
+                            </div>
+                        `;
+
+                        // 正常段 + 高速公路段區分顏色繪製
+                        const p1 = L.polyline(route.slice(0, 600), {
+                            color: '#06b6d4',
+                            weight: 3,
+                            opacity: 0.8
+                        }).addTo(map);
+
+                        const p2 = L.polyline(route.slice(780), {
+                            color: '#ef4444',
+                            weight: 4,
+                            dashArray: '5, 8',
+                            opacity: 0.9
+                        }).addTo(map);
+
+                        pathLine = L.layerGroup([p1, p2]).addTo(map);
+                    } else {
+                        // 手動上傳的自訂軌跡測試 (動態計算作弊)
+                        let maxSpeed = 0;
+                        let altList = [];
+                        let stationaryCount = 0;
+                        
+                        data.points.forEach((p, idx) => {
+                            if (p.speed_kmh > maxSpeed) maxSpeed = p.speed_kmh;
+                            if (p.speed_kmh < 2.0) stationaryCount++;
+                            altList.push(p.alt);
+                        });
+                        
+                        // 計算作弊判定與嫌疑
+                        let isOverSpeed = maxSpeed > 85.0;
+                        let isHsrSpeed = maxSpeed > 130.0;
+                        let isHighway = false;
+                        
+                        // 簡單的道路貼合模擬（時速在 90-120 之間且高度平緩不變）
+                        let sampleAlt = altList.slice(Math.floor(altList.length * 0.4), Math.floor(altList.length * 0.8));
+                        let altVariance = 0;
+                        if (sampleAlt.length > 1) {
+                            let mean = sampleAlt.reduce((a,b)=>a+b,0) / sampleAlt.length;
+                            let sqDiff = sampleAlt.map(x => Math.pow(x - mean, 2));
+                            altVariance = sqDiff.reduce((a,b)=>a+b,0) / (sampleAlt.length - 1);
+                        }
+                        if (maxSpeed >= 90.0 && altVariance < 15.0) {
+                            isHighway = true;
+                        }
+
+                        let riskScore = 0;
+                        let alertHtml = "";
+                        
+                        if (isHsrSpeed) {
+                            riskScore = 100;
+                            document.getElementById('risk-badge').innerText = "嚴重作弊 (100%)";
+                            document.getElementById('risk-badge').className = "text-xs font-bold px-2 py-0.5 rounded-full bg-red-900/50 text-red-400 border border-red-700";
+                            document.getElementById('risk-bar').style.width = "100%";
+                            document.getElementById('risk-bar').className = "bg-red-600 h-3 rounded-full transition-all duration-500";
+                            
+                            alertHtml += `
+                                <div class="flex items-start space-x-2 bg-red-950/20 border border-red-900/50 p-2.5 rounded">
+                                    <i class="fa-solid fa-gauge-high text-red-500 mt-0.5"></i>
+                                    <div>
+                                        <div class="font-bold text-red-400">極速不合理超速 (CRITICAL_OVER_SPEED)</div>
+                                        <p class="text-gray-400 mt-0.5">偵測到高鐵/鐵路等級的移動時速達 ${maxSpeed.toFixed(1)} km/h，非生物飛行可能，100% 判定坐車。</p>
+                                    </div>
+                                </div>
+                            `;
+                        } else if (isHighway) {
+                            riskScore = 95;
+                            document.getElementById('risk-badge').innerText = "高危作弊 (95%)";
+                            document.getElementById('risk-badge').className = "text-xs font-bold px-2 py-0.5 rounded-full bg-red-900/50 text-red-400 border border-red-700";
+                            document.getElementById('risk-bar').style.width = "95%";
+                            document.getElementById('risk-bar').className = "bg-red-500 h-3 rounded-full transition-all duration-500";
+                            
+                            alertHtml += `
+                                <div class="flex items-start space-x-2 bg-red-950/20 border border-red-900/50 p-2.5 rounded">
+                                    <i class="fa-solid fa-triangle-exclamation text-red-500 mt-0.5"></i>
+                                    <div>
+                                        <div class="font-bold text-red-400">陸地高速公路貼合 (HIGHWAY_MATCH)</div>
+                                        <p class="text-gray-400 mt-0.5">最高時速達 ${maxSpeed.toFixed(1)} km/h，且軌跡海拔高度波動極小，與陸路運輸工具高速行駛特徵吻合。</p>
+                                    </div>
+                                </div>
+                            `;
+                        } else if (isOverSpeed) {
+                            riskScore = 80;
+                            document.getElementById('risk-badge').innerText = `高度懷疑 (${riskScore}%)`;
+                            document.getElementById('risk-badge').className = "text-xs font-bold px-2 py-0.5 rounded-full bg-red-900/50 text-red-400 border border-red-700";
+                            document.getElementById('risk-bar').style.width = `${riskScore}%`;
+                            document.getElementById('risk-bar').className = "bg-red-500 h-3 rounded-full transition-all duration-500";
+                            
+                            alertHtml += `
+                                <div class="flex items-start space-x-2 bg-red-950/20 border border-red-900/50 p-2.5 rounded">
+                                    <i class="fa-solid fa-gauge-high text-red-500 mt-0.5"></i>
+                                    <div>
+                                        <div class="font-bold text-red-400">不合理飛行速度 (OVER_SPEED)</div>
+                                        <p class="text-gray-400 mt-0.5">最高時速達 ${maxSpeed.toFixed(1)} km/h，已超出賽鴿生理極限空速 (85 km/h)。</p>
+                                    </div>
+                                </div>
+                            `;
+                        } else if (stationaryCount > 5) {
+                            riskScore = 45;
+                            document.getElementById('risk-badge').innerText = `中度懷疑 (45%)`;
+                            document.getElementById('risk-badge').className = "text-xs font-bold px-2 py-0.5 rounded-full bg-orange-900/50 text-orange-400 border border-orange-700";
+                            document.getElementById('risk-bar').style.width = `${riskScore}%`;
+                            document.getElementById('risk-bar').className = "bg-orange-500 h-3 rounded-full transition-all duration-500";
+                            
+                            alertHtml += `
+                                <div class="flex items-start space-x-2 bg-orange-950/20 border border-orange-900/50 p-2.5 rounded">
+                                    <i class="fa-solid fa-house-laptop text-orange-500 mt-0.5"></i>
+                                    <div>
+                                        <div class="font-bold text-orange-400">中繼舍長時滯留 (AB_COTE_STATIONARY)</div>
+                                        <p class="text-gray-400 mt-0.5">賽鴿於途中非登記鴿舍處滯留不動達 ${(stationaryCount * 3).toFixed(1)} 分鐘，疑似在 AB 中繼舍停留餵水或抓捕。</p>
+                                    </div>
+                                </div>
+                            `;
+                        } else {
+                            document.getElementById('risk-badge').innerText = "安全正常 (0%)";
+                            document.getElementById('risk-badge').className = "text-xs font-bold px-2 py-0.5 rounded-full bg-green-900/50 text-green-400 border border-green-700";
+                            document.getElementById('risk-bar').style.width = "0%";
+                            document.getElementById('risk-bar').className = "bg-green-500 h-3 rounded-full transition-all duration-500";
+                            
+                            alertHtml += `
+                                <div class="flex items-start space-x-2 bg-green-950/20 border border-green-900/50 p-2.5 rounded">
+                                    <i class="fa-solid fa-circle-check text-green-500 mt-0.5"></i>
+                                    <div>
+                                        <div class="font-bold text-green-400">合規軌跡</div>
+                                        <p class="text-gray-400 mt-0.5">手動上傳的軌跡數據全數合規，未偵測到超出 85 km/h 之異常時速，且無中途長時滯留點。</p>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        document.getElementById('alert-list').innerHTML = alertHtml;
+                        document.getElementById('val-max-speed').innerHTML = `${maxSpeed.toFixed(1)} <span class='text-xs'>km/h</span>`;
+                        document.getElementById('val-stationary').innerHTML = `${(stationaryCount * 3).toFixed(1)} <span class='text-xs'>min</span>`;
+                        
+                        // 畫線：若作弊則畫紅線，否則畫綠色線
+                        pathLine = L.polyline(route, {
+                            color: riskScore >= 80 ? '#ef4444' : (riskScore >= 30 ? '#f97316' : '#06b6d4'),
+                            weight: 3,
+                            opacity: 0.8
+                        }).addTo(map);
+                    }
+
+                    map.fitBounds(pathLine instanceof L.LayerGroup ? L.latLngBounds(route) : pathLine.getBounds(), { padding: [50, 50] });
+                    return;
+                }
+            } catch (err) {
+                console.error("Failed to fetch live points:", err);
+            }
+
+            // Fallback (靜態模擬)
+            console.log("Falling back to static emulation path");
+            document.getElementById('device-info-panel').classList.remove('hidden');
+            document.getElementById('analysis-panel').classList.remove('hidden');
+
+            document.getElementById('val-device').innerText = deviceId;
+            document.getElementById('val-race').innerText = "115D1X";
+            document.getElementById('val-cote').innerText = "8888";
+            document.getElementById('val-ring').innerText = deviceId === "G0703-00001" ? "660001" : "660002";
+            document.getElementById('val-interval').innerText = "10s";
+            document.getElementById('val-mode').innerText = "hybrid";
+
+            if (type === 'normal') {
+                document.getElementById('risk-badge').innerText = "低風險 (0%)";
+                document.getElementById('risk-badge').className = "text-xs font-bold px-2 py-0.5 rounded-full bg-green-900/50 text-green-400 border border-green-700";
+                document.getElementById('risk-bar').style.width = "0%";
+                document.getElementById('risk-bar').className = "bg-green-500 h-3 rounded-full transition-all duration-500";
+                
+                document.getElementById('val-max-speed').innerHTML = "78.4 <span class='text-xs'>km/h</span>";
+                document.getElementById('val-stationary').innerHTML = "0.0 <span class='text-xs'>min</span>";
+
+                document.getElementById('alert-list').innerHTML = `
+                    <div class="flex items-start space-x-2 bg-green-950/20 border border-green-900/50 p-2.5 rounded">
+                        <i class="fa-solid fa-circle-check text-green-500 mt-0.5"></i>
+                        <div>
+                            <div class="font-bold text-green-400">合規軌跡</div>
+                            <p class="text-gray-400 mt-0.5">整段軌跡未發現異常，平均時速符合賽鴿自然飛行體能表現。</p>
+                        </div>
+                    </div>
+                `;
+
+                const polylinePoints = [];
+                const steps = 100;
+                for (let i = 0; i <= steps; i++) {
+                    const ratio = i / steps;
+                    const noiseLat = (Math.sin(i * 0.2) * 0.04) * (1 - ratio) * ratio;
+                    const noiseLng = (Math.cos(i * 0.2) * 0.04) * (1 - ratio) * ratio;
+                    polylinePoints.push([
+                        pointsConfig.start[0] + (pointsConfig.end[0] - pointsConfig.start[0]) * ratio + noiseLat,
+                        pointsConfig.start[1] + (pointsConfig.end[1] - pointsConfig.start[1]) * ratio + noiseLng
+                    ]);
+                }
+                
+                pathLine = L.polyline(polylinePoints, {
+                    color: '#06b6d4',
+                    weight: 3,
+                    opacity: 0.8
+                }).addTo(map);
+                
+                map.fitBounds(pathLine.getBounds(), { padding: [50, 50] });
+            } else {
+                document.getElementById('risk-badge').innerText = "高危作弊 (95%)";
+                document.getElementById('risk-badge').className = "text-xs font-bold px-2 py-0.5 rounded-full bg-red-900/50 text-red-400 border border-red-700";
+                document.getElementById('risk-bar').style.width = "95%";
+                document.getElementById('risk-bar').className = "bg-red-500 h-3 rounded-full transition-all duration-500";
+                
+                document.getElementById('val-max-speed').innerHTML = "114.2 <span class='text-xs'>km/h</span>";
+                document.getElementById('val-stationary').innerHTML = "30.0 <span class='text-xs'>min</span>";
+
+                document.getElementById('alert-list').innerHTML = `
+                    <div class="flex items-start space-x-2 bg-red-950/20 border border-red-900/50 p-2.5 rounded">
+                        <i class="fa-solid fa-triangle-exclamation text-red-500 mt-0.5"></i>
+                        <div>
+                            <div class="font-bold text-red-400">陸地高速公路貼合 (HIGHWAY_MATCH)</div>
+                            <p class="text-gray-400 mt-0.5">偵測到軌跡有 40.5 公里與國道一號高度貼合，並保持 100+ km/h 定速，有極高坐車可能性。</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start space-x-2 bg-red-950/20 border border-red-900/50 p-2.5 rounded">
+                        <i class="fa-solid fa-gauge-high text-red-500 mt-0.5"></i>
+                        <div>
+                            <div class="font-bold text-red-400">不合理飛行速度 (OVER_SPEED)</div>
+                            <p class="text-gray-400 mt-0.5">最高陸上時速達 114.2 km/h，已遠超信鴿極限生理空速 (85 km/h)。</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start space-x-2 bg-orange-950/20 border border-orange-900/50 p-2.5 rounded">
+                        <i class="fa-solid fa-house-laptop text-orange-500 mt-0.5"></i>
+                        <div>
+                            <div class="font-bold text-orange-400">中繼舍長時滯留 (AB_COTE_STATIONARY)</div>
+                            <p class="text-gray-400 mt-0.5">賽鴿於台中 AB 中繼舍停留長達 30.0 分鐘，不符正常歸返的連續飛行行為。</p>
+                        </div>
+                    </div>
+                `;
+
+                const route1 = [];
+                const steps1 = 50;
+                for (let i = 0; i <= steps1; i++) {
+                    const ratio = i / steps1;
+                    const noiseLat = (Math.sin(i * 0.1) * 0.02) * (1 - ratio) * ratio;
+                    const noiseLng = (Math.cos(i * 0.1) * 0.02) * (1 - ratio) * ratio;
+                    route1.push([
+                        pointsConfig.start[0] + (pointsConfig.ab_cote[0] - pointsConfig.start[0]) * ratio + noiseLat,
+                        pointsConfig.start[1] + (pointsConfig.ab_cote[1] - pointsConfig.start[1]) * ratio + noiseLng
+                    ]);
+                }
+
+                const route2 = [
+                    pointsConfig.ab_cote,
+                    [24.0500, 120.5300], // 彰化
+                    [23.8500, 120.4500], // 溪州
+                    [23.7000, 120.4300], // 西螺
+                    [23.6000, 120.4300], // 斗南
+                    pointsConfig.end
+                ];
+
+                const p1 = L.polyline(route1, {
+                    color: '#06b6d4',
+                    weight: 3,
+                    opacity: 0.8
+                }).addTo(map);
+
+                const p2 = L.polyline(route2, {
+                    color: '#ef4444',
+                    weight: 4,
+                    dashArray: '5, 8',
+                    opacity: 0.9
+                }).addTo(map);
+
+                const bounds = L.latLngBounds(route1.concat(route2));
+                map.fitBounds(bounds, { padding: [50, 50] });
+
+                pathLine = L.layerGroup([p1, p2]).addTo(map);
+            }
+        }
+
+        // CSV 上傳異步處理
+        async function uploadCSV(event) {
+            event.preventDefault();
+            const statusDiv = document.getElementById('csv-upload-status');
+            statusDiv.innerText = "上傳並解析中...";
+            statusDiv.className = "text-[10px] text-teal-400 italic";
+
+            const fileInput = document.getElementById('csv-file');
+            const device = document.getElementById('csv-device').value;
+            const ring = document.getElementById('csv-ring').value;
+            const race = document.getElementById('csv-race').value;
+            const cote = document.getElementById('csv-cote').value;
+
+            if (!fileInput.files || fileInput.files.length === 0) {
+                statusDiv.innerText = "請選擇一個 CSV 檔案";
+                statusDiv.className = "text-[10px] text-red-400 italic";
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
+
+            try {
+                // 指向 API Port 8801
+                const apiHost = window.location.hostname === "gps.xdove.win"
+                    ? "https://gps.xdove.win/api"
+                    : `${window.location.protocol}//${window.location.hostname}:8801`;
+                const url = `${apiHost}/api/v1/tracks/upload/csv?device=${encodeURIComponent(device)}&race=${encodeURIComponent(race)}&cote=${encodeURIComponent(cote)}&ring=${encodeURIComponent(ring)}`;
+                
+                const res = await fetch(url, {
+                    method: "POST",
+                    body: formData
+                });
+                const data = await res.json();
+
+                if (res.ok && data.status === "success") {
+                    statusDiv.innerText = `成功！解析 ${data.parsed_rows} 點並載入數據。`;
+                    statusDiv.className = "text-[10px] text-green-400 font-semibold";
+                    
+                    // 自動載入該新增的測試軌跡
+                    setTimeout(() => {
+                        loadTrack(device, 'normal');
+                    }, 1000);
+                } else {
+                    statusDiv.innerText = `失敗: ${data.detail || '格式錯誤'}`;
+                    statusDiv.className = "text-[10px] text-red-400 italic";
+                }
+            } catch (err) {
+                console.error("CSV upload request error:", err);
+                statusDiv.innerText = "連線 API 伺服器失敗，請確認 Port 8801 運作中。";
+                statusDiv.className = "text-[10px] text-red-400 italic";
+            }
+        }
+    </script>
+</body>
+</html>

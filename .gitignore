@@ -1,0 +1,22 @@
+# 忽略 Python 快取、暫存、以及非必要的大型或機密文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# 系統與編輯器暫存
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 測試生成的資料
+*.csv.bak
