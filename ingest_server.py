@@ -78,6 +78,15 @@ class IngestPayload(BaseModel):
 MOCK_CONFIGS = {}
 MOCK_TRACK_POINTS = []
 
+# --- 升級：解決 Favicon 控制台錯誤 ---
+@app.get("/favicon.ico", status_code=204)
+def get_favicon_ico():
+    return None
+
+@app.get("/favicon.svg", status_code=204)
+def get_favicon_svg():
+    return None
+
 # --- 升級：支援前端與靜態網頁合併託管 ---
 @app.get("/", response_class=HTMLResponse)
 def read_root():
@@ -312,6 +321,36 @@ def get_device_race_tracks(device_id: str, race_id: str):
     if conn is None:
         # 從 Mock 撈資料
         pts = [p for p in MOCK_TRACK_POINTS if p['device'] == device_id and p['race'] == race_id]
+        if not pts:
+            # 動態回退到自動生成，實現 100% 動態降級與多樣板支援
+            mode_map = {
+                "G0703-00001": "normal",
+                "G0703-00002": "cheat_highway",
+                "G0703-CHEATER": "cheat_highway",
+                "G0703-AB_COTE": "suspicious_ab",
+                "G0703-HSR": "cheat_hsr"
+            }
+            selected_mode = mode_map.get(device_id, "normal")
+            import train_dataset_generator
+            raw_pts = train_dataset_generator.generate_csv_track(selected_mode)
+            pts = []
+            for p in raw_pts:
+                pts.append({
+                    "seq": p["seq"],
+                    "timestamp": p["timestamp"],
+                    "lat": p["lat"],
+                    "lng": p["lng"],
+                    "alt": p["alt"],
+                    "speed_kmh": p["speed_kmh"],
+                    "heading": p["heading"],
+                    "hdop": p["hdop"],
+                    "satellites": p["satellites"],
+                    "battery_mv": p["battery_mv"],
+                    "rssi": p["rssi"],
+                    "device": device_id,
+                    "race": race_id
+                })
+        
         # 進行物理防弊分析
         analysis = engine.analyze_track(pts)
         return {
