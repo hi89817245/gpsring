@@ -1,13 +1,16 @@
 #!/bin/bash
-# open88 服務快速啟動/重啟指令
+# start88 服務快速啟動/重啟指令
+# 版本：v0.1.5 (物理天網 - 雙港合一 陸海氣象大升級版)
 
 PORT_API=8801
 PORT_WEB=8802
 WORKDIR="/home/hi/workspace/gpsring"
+VERSION="v0.1.5"
 
-echo "=========================================="
-echo "      GPS 鴿環專用後台啟動工具 [open88]"
-echo "=========================================="
+echo "=========================================================="
+echo "      GPS 鴿環專用後台啟動工具 [start88] - Version: ${VERSION}"
+echo "      版名：「物理天網 - 雙港合一 陸海氣象大升級版」"
+echo "=========================================================="
 
 # 1. 清理舊服務避免 Port 衝突
 echo "[*] 正在檢查並關閉佔用 Port ${PORT_API} 與 ${PORT_WEB} 的舊服務..."
@@ -21,14 +24,14 @@ cd ${WORKDIR}
 nohup python3 -m uvicorn ingest_server:app --host 0.0.0.0 --port ${PORT_API} > /tmp/ingest_server_8801.log 2>&1 &
 PID_API=$!
 
-# 3. 啟動 8802 Web + API 整合服務 (FastAPI)
+# 3. 啟動 8802 Web 前端地圖與 API 整合託管服務 (雙港合一)
 echo "[*] 啟動 8802 Web 前端地圖與 API 整合託管服務 (雙港合一)..."
 nohup python3 -m uvicorn ingest_server:app --host 0.0.0.0 --port ${PORT_WEB} > /tmp/ingest_server_8802.log 2>&1 &
 PID_WEB=$!
 
 # 4. 驗證服務
 sleep 2
-echo "------------------------------------------"
+echo "----------------------------------------------------------"
 if ps -p $PID_API > /dev/null; then
     echo "✅ [API 8801 服務] 啟動成功！Port: ${PORT_API} (PID: ${PID_API})"
 else
@@ -40,9 +43,9 @@ if ps -p $PID_WEB > /dev/null; then
 else
     echo "❌ [Web 8802 整合服務] 啟動失敗！請檢查 /tmp/ingest_server_8802.log"
 fi
-echo "------------------------------------------"
+echo "----------------------------------------------------------"
 echo "👉 您的實體測試網址與外網 SSL 反代位址："
 echo "   - 整合接口與地圖：https://gps.xdove.win/index.html"
 echo "   - API Swagger 文件：https://gps.xdove.win/docs"
 echo "   - 本地測試：http://192.168.120.218:${PORT_WEB}/index.html"
-echo "=========================================="
+echo "=========================================================="
