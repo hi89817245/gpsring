@@ -11,6 +11,8 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <!-- FontAwesome 圖示 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="alternate icon" href="/favicon.ico">
 </head>
 <body class="bg-gray-900 text-white min-h-screen flex flex-col">
 
@@ -48,6 +50,31 @@
                             <i class="fa-solid fa-truck-monster mr-1"></i> 作弊 (00002)
                         </button>
                     </div>
+                </div>
+                
+                <!-- 新增：在地圖點選點位模擬 GPS 鴿環 -->
+                <div class="border-t border-gray-600 pt-3 space-y-2 text-xs">
+                    <div class="flex justify-between items-center">
+                        <h4 class="font-semibold text-teal-400"><i class="fa-solid fa-map-pin mr-1"></i> 自建/畫圖 GPS 點位模擬器</h4>
+                        <button onclick="clearCustomPoints()" class="text-[10px] text-red-400 hover:text-red-300 underline">重置自建</button>
+                    </div>
+                    <p class="text-[10px] text-gray-400 leading-tight">請直接在地圖上滑鼠【左鍵點選】。每點擊一次即記錄一個軌跡點，將自動依照時間順序與點選的高度生成 CSV 資料流。</p>
+                    
+                    <div class="space-y-1 bg-gray-800 p-2 rounded border border-gray-700">
+                        <div class="flex items-center justify-between">
+                            <label class="text-[10px] text-gray-400">當前高度設定 (公尺/m):</label>
+                            <input type="number" id="custom-alt" value="200" class="w-16 bg-gray-900 border border-gray-600 text-teal-300 text-[10px] rounded px-1 py-0.5 text-center">
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <label class="text-[10px] text-gray-400">間隔時間 (秒/s):</label>
+                            <input type="number" id="custom-interval" value="10" class="w-16 bg-gray-900 border border-gray-600 text-teal-300 text-[10px] rounded px-1 py-0.5 text-center">
+                        </div>
+                        <div class="flex items-center justify-between pt-1">
+                            <span class="text-[10px] text-gray-400">已點選點數: <span id="custom-count" class="text-teal-400 font-bold">0</span> 點</span>
+                            <button onclick="copyGeneratedCSV()" id="btn-copy-csv" class="py-0.5 px-2 bg-indigo-600 hover:bg-indigo-500 rounded text-[10px] font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed" disabled>複製 CSV 暫存</button>
+                        </div>
+                    </div>
+                    <textarea id="custom-csv-output" readonly placeholder="此處顯示即時產生的 CSV 內容，您可以直接複製貼上微調..." class="w-full h-16 bg-gray-900 border border-gray-700 rounded p-1 text-[9px] font-mono text-gray-400 focus:text-teal-300 outline-none resize-none"></textarea>
                 </div>
                 
                 <div class="border-t border-gray-600 pt-3 space-y-2">
@@ -163,6 +190,122 @@
 
         let pathLine = null;
         let markersGroup = L.layerGroup().addTo(map);
+        let customMarkersGroup = L.layerGroup().addTo(map);
+        let customPoints = [];
+        let customPolyline = null;
+
+        // 地圖點選事件
+        map.on('click', function(e) {
+            const lat = parseFloat(e.latlng.lat.toFixed(6));
+            const lng = parseFloat(e.latlng.lng.toFixed(6));
+            const alt = parseFloat(document.getElementById('custom-alt').value) || 200;
+            const interval = parseInt(document.getElementById('custom-interval').value) || 10;
+            
+            // 建立點位資訊
+            const seq = customPoints.length + 1;
+            const timestamp = Math.floor(Date.now() / 1000) - (3600 * 4) + (seq * interval); // 4小時前為起點遞增
+            
+            // 計算簡單時速
+            let speed_kmh = 0;
+            if (customPoints.length > 0) {
+                const prev = customPoints[customPoints.length - 1];
+                const dist = getDistance(prev.lat, prev.lng, lat, lng); // 單位公尺
+                speed_kmh = parseFloat(((dist / interval) * 3.6).toFixed(1)); // m/s 轉 km/h
+            } else {
+                speed_kmh = 0.0;
+            }
+
+            const point = {
+                seq: seq,
+                timestamp: timestamp,
+                lat: lat,
+                lng: lng,
+                alt: alt,
+                speed_kmh: speed_kmh,
+                heading: 180.0,
+                hdop: 0.9,
+                satellites: 12,
+                battery_mv: 3950,
+                rssi: -80
+            };
+
+            customPoints.push(point);
+            
+            // 地圖繪製對應 Marker
+            L.circleMarker([lat, lng], {
+                radius: 6,
+                fillColor: "#a78bfa",
+                color: "#fff",
+                weight: 1.5,
+                fillOpacity: 0.9
+            }).addTo(customMarkersGroup).bindPopup(`<b>自建點 #${seq}</b><br>緯度: ${lat}<br>經度: ${lng}<br>高度: ${alt}m<br>預估時速: ${speed_kmh} km/h`);
+
+            // 更新畫線
+            if (customPolyline) {
+                map.removeLayer(customPolyline);
+            }
+            const latlngs = customPoints.map(p => [p.lat, p.lng]);
+            customPolyline = L.polyline(latlngs, {
+                color: '#a78bfa',
+                weight: 3,
+                opacity: 0.85,
+                dashArray: '4, 4'
+            }).addTo(customMarkersGroup);
+
+            // 更新界面
+            document.getElementById('custom-count').innerText = customPoints.length;
+            document.getElementById('btn-copy-csv').disabled = false;
+            
+            // 生成並輸出 CSV 內容到 textarea
+            renderCustomCSV();
+        });
+
+        // 經緯度兩點距離公式
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371000; // 地球半徑 (公尺)
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+        }
+
+        function clearCustomPoints() {
+            customPoints = [];
+            customMarkersGroup.clearLayers();
+            if (customPolyline) {
+                map.removeLayer(customPolyline);
+                customPolyline = null;
+            }
+            document.getElementById('custom-count').innerText = "0";
+            document.getElementById('custom-csv-output').value = "";
+            document.getElementById('btn-copy-csv').disabled = true;
+        }
+
+        function renderCustomCSV() {
+            let csv = "seq,timestamp,lat,lng,alt,speed_kmh,heading,hdop,satellites,battery_mv,rssi\n";
+            customPoints.forEach(p => {
+                csv += `${p.seq},${p.timestamp},${p.lat},${p.lng},${p.alt},${p.speed_kmh},${p.heading},${p.hdop},${p.satellites},${p.battery_mv},${p.rssi}\n`;
+            });
+            document.getElementById('custom-csv-output').value = csv;
+        }
+
+        function copyGeneratedCSV() {
+            const textarea = document.getElementById('custom-csv-output');
+            textarea.select();
+            document.execCommand('copy');
+            
+            const btn = document.getElementById('btn-copy-csv');
+            const originalText = btn.innerText;
+            btn.innerText = "已複製！";
+            btn.className = "py-0.5 px-2 bg-green-600 rounded text-[10px] font-bold text-white";
+            setTimeout(() => {
+                btn.innerText = originalText;
+                btn.className = "py-0.5 px-2 bg-indigo-600 hover:bg-indigo-500 rounded text-[10px] font-bold text-white";
+            }, 1500);
+        }
 
         // 預設標誌性點位 (0703 頭份大鴻鴿會為基準)
         const pointsConfig = {
