@@ -58,48 +58,68 @@ class PigeonFraudEngine:
                 stationary_intervals += 1
                 current_stationary_points.append(p_curr)
 
-        # 2. 高速公路特徵檢測 (簡化演算法：如果超速，且平均高度和高度變化平緩)
-        highway_match_points = []
-        for p in points:
-            # 模擬：如果速度 >= 90 且海拔高度平緩不變 (e.g. 50-80公尺)，標記為坐車可疑點
-            if p.get("speed_kmh", 0.0) >= self.highway_speed_threshold and p.get("alt", 0.0) < 100.0:
-                highway_match_points.append(p)
-
-        # 3. 計算綜合風險分數
-        risk_score = 0
+        # 2. 高速公路與物理異常特徵檢測 (為每個點上標籤)
+        anomaly_segments = [] # 儲存分段格式: {"start_idx": int, "end_idx": int, "reason": str, "level": "WARNING"|"CRITICAL"}
         
-        if overspeed_segments > 0:
-            # 有超過鴿子極限速度的點
-            speed_ratio = overspeed_segments / total_points
-            if speed_ratio > 0.1: # 超過 10% 的點都大於 85km/h，極可能坐車
-                risk_score += 60
-                alerts.append({
-                    "type": "OVER_SPEED",
-                    "level": "CRITICAL",
-                    "message": f"偵測到不合理超速點！最高時速達 {highest_speed:.1f} km/h，超速點比例 {speed_ratio*100:.1f}%。"
-                })
-            else:
-                risk_score += 20
-                alerts.append({
-                    "type": "OVER_SPEED",
-                    "level": "WARNING",
-                    "message": f"偵測到少部分超速點。最高時速達 {highest_speed:.1f} km/h。"
-                })
+        # 遍歷所有點進行精確的物理特徵標記 (我們直接將異常標記寫入各點中，供前端 Leaflet 直接依點變色)
+        for idx, p in enumerate(points):
+            p["status"] = "PASS"  # 預設正常
+            p["anomaly_reason"] = ""
+            
+            speed = p.get("speed_kmh", 0.0)
+            alt = p.get("alt", 0.0)
+            
+            # A. 超人速度判定 (HSR 或 瞬間位移異常)
+            if speed > 120.0:
+                p["status"] = "CRITICAL_FRAUD"
+                p["anomaly_reason"] = f"超人時速: {speed} km/h (賽鴿生理極限 110 km/h)"
+                
+            # B. 貼地高速飛行判定 (疑似坐車/走高速公路)
+            elif speed >= self.highway_speed_threshold and alt < 100.0:
+                p["status"] = "CRITICAL_FRAUD"
+                p["anomaly_reason"] = f"貼地高速: 時速 {speed} km/h 且高度僅 {alt}m，疑似陸路運輸"
+                
+            # C. 疑似中途滯留點 (AB舍/關籠)
+            elif speed < 2.0:
+                p["status"] = "SUSPICIOUS"
+                p["anomaly_reason"] = f"疑似中途滯留: 速度幾乎靜止 ({speed} km/h)"
 
-        if len(highway_match_points) > 10:
+        # 3. 計算綜合風險分數 (基於整軌跡)
+        risk_score = 0
+        critical_count = sum(1 for p in points if p["status"] == "CRITICAL_FRAUD")
+        suspicious_count = sum(1 for p in points if p["status"] == "SUSPICIOUS")
+        
+        overspeed_ratio = sum(1 for p in points if p.get("speed_kmh", 0.0) > self.normal_max_speed) / total_points
+        
+        if overspeed_ratio > 0.1:
+            risk_score += 60
+            alerts.append({
+                "type": "OVER_SPEED",
+                "level": "CRITICAL",
+                "message": f"偵測到不合理超速點！最高時速達 {highest_speed:.1f} km/h，超速點比例 {overspeed_ratio*100:.1f}%。"
+            })
+        elif overspeed_ratio > 0:
+            risk_score += 20
+            alerts.append({
+                "type": "OVER_SPEED",
+                "level": "WARNING",
+                "message": f"偵測到少部分超速點。最高時速達 {highest_speed:.1f} km/h。"
+            })
+
+        if critical_count > 5:
             risk_score += 30
             alerts.append({
                 "type": "HIGHWAY_MATCH",
                 "level": "CRITICAL",
-                "message": f"軌跡特徵與陸路運輸高度重合！共偵測到 {len(highway_match_points)} 個貼合道路且定速運動的異常點。"
+                "message": f"軌跡特徵與陸路運輸高度重合！共偵測到 {critical_count} 個貼合道路且定速運動的異常點。"
             })
 
-        if stationary_intervals > 100: # 100點 = 1000秒 ≈ 16分鐘在某處滯留不動
+        if suspicious_count > 10:
             risk_score += 15
             alerts.append({
                 "type": "AB_COTE_STATIONARY",
                 "level": "WARNING",
-                "message": f"賽鴿在中途疑似長點滯留 (可能在 AB 中繼舍停留)，滯留時間長達 {stationary_intervals*10/60:.1f} 分鐘。"
+                "message": f"賽鴿在中途疑似長點滯留 (可能在 AB 中繼舍停留)，滯留點共計 {suspicious_count} 個。"
             })
 
         # 風險分數最大 100

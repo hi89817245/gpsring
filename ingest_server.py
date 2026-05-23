@@ -82,7 +82,7 @@ from fastapi import UploadFile, File
 import io
 import csv
 
-CSV_FIELDS = ["seq", "timestamp", "lat", "lng", "alt", "speed_kmh", "heading", "hdop", "satellites", "battery_mv", "rssi"]
+CSV_FIELDS = ["id", "seq", "timestamp", "lat", "lng", "alt", "speed_kmh", "heading", "hdop", "satellites", "battery_mv", "rssi"]
 
 @app.get("/api/v1/tracks/template/csv")
 def download_csv_template(mode: str = "normal"):
@@ -95,7 +95,7 @@ def download_csv_template(mode: str = "normal"):
     writer.writerow(CSV_FIELDS)
     for p in points:
         writer.writerow([
-            p["seq"], p["timestamp"], p["lat"], p["lng"], p["alt"],
+            p.get("id", "G0703-00001"), p["seq"], p["timestamp"], p["lat"], p["lng"], p["alt"],
             p["speed_kmh"], p["heading"], p["hdop"], p["satellites"],
             p["battery_mv"], p["rssi"]
         ])
@@ -122,15 +122,20 @@ async def upload_csv_tracks(
     ring: str,
     file: UploadFile = File(...)
 ):
-    """手動上傳 CSV 軌跡數據檔，直接寫入對應的 Pigeon Ring"""
+    """手動上傳 CSV 軌跡數據檔，直接寫入對應的 Pigeon Ring (支援單一 CSV 整合多個 ID 軌跡)"""
     try:
         content = await file.read()
         decoded = content.decode("utf-8")
         reader = csv.DictReader(io.StringIO(decoded))
         
-        points = []
+        # 將點按照 id (或預設傳入的 ring/device) 進行分類
+        grouped_points = {}
+        
         for row in reader:
             try:
+                # 支援 CSV 中存在 'id' 或 'ring_id' 欄位，若無則降級使用 API query string 帶入的 ring 參數
+                pid = row.get("id") or row.get("ring_id") or ring or device
+                
                 pt = GPSPoint(
                     seq=int(row["seq"]),
                     timestamp=int(row["timestamp"]),
@@ -144,21 +149,34 @@ async def upload_csv_tracks(
                     battery_mv=int(row["battery_mv"]),
                     rssi=int(row["rssi"])
                 )
-                points.append(pt)
+                
+                if pid not in grouped_points:
+                    grouped_points[pid] = []
+                grouped_points[pid].append(pt)
+                
             except (KeyError, ValueError) as err:
                 logger.warning(f"CSV Row validation failed, skipping row: {row}. Error: {err}")
                 continue
                 
-        if not points:
+        if not grouped_points:
             raise HTTPException(status_code=400, detail="CSV file contained no valid GPS points matching schema.")
             
-        payload = IngestPayload(device=device, race=race, cote=cote, ring=ring, points=points)
-        result = ingest_gps_tracks(payload)
+        results = {}
+        total_rows = 0
+        for pid, pts in grouped_points.items():
+            # 對於每個分組好的 ID，進行寫入
+            # 對應設備與 ring，若無傳入則設為相同 id
+            payload = IngestPayload(device=pid, race=race, cote=cote, ring=pid, points=pts)
+            res = ingest_gps_tracks(payload)
+            results[pid] = res
+            total_rows += len(pts)
+            
         return {
             "status": "success",
-            "message": f"Successfully parsed and loaded CSV.",
-            "parsed_rows": len(points),
-            "ingest_result": result
+            "message": f"Successfully parsed and loaded multi-track CSV.",
+            "parsed_rows": total_rows,
+            "tracks_count": len(grouped_points),
+            "ingest_result": results
         }
     except Exception as e:
         logger.error(f"Failed to process uploaded CSV: {e}")
@@ -258,10 +276,19 @@ def ingest_gps_tracks(payload: IngestPayload):
 @app.get("/api/v1/tracks/{device_id}/{race_id}")
 def get_device_race_tracks(device_id: str, race_id: str):
     conn = get_db_conn()
+    from fraud_engine import PigeonFraudEngine
+    engine = PigeonFraudEngine()
+    
     if conn is None:
         # 從 Mock 撈資料
         pts = [p for p in MOCK_TRACK_POINTS if p['device'] == device_id and p['race'] == race_id]
-        return {"status": "success", "points": pts}
+        # 進行物理防弊分析
+        analysis = engine.analyze_track(pts)
+        return {
+            "status": "success", 
+            "points": pts,
+            "analysis": analysis
+        }
         
     try:
         with conn.cursor() as cur:
@@ -272,7 +299,7 @@ def get_device_race_tracks(device_id: str, race_id: str):
                     EXTRACT(EPOCH FROM gps_time)::INT as timestamp,
                     ST_Y(geom) as lat, 
                     ST_X(geom) as lng, 
-                    altitude, 
+                    altitude as alt, 
                     speed_kmh, 
                     heading, 
                     hdop, 
@@ -284,7 +311,15 @@ def get_device_race_tracks(device_id: str, race_id: str):
                 ORDER BY seq ASC;
             """, (device_id, race_id))
             rows = cur.fetchall()
-        return {"status": "success", "points": rows}
+            
+            # Python DB API 返回的 RealDictCursor 是 dict，我們需要將它傳給防弊引擎進行計算
+            analysis = engine.analyze_track(rows)
+            
+        return {
+            "status": "success", 
+            "points": rows,
+            "analysis": analysis
+        }
     except Exception as e:
         logger.error(f"Failed to retrieve tracks: {e}")
         raise HTTPException(status_code=500, detail=str(e))

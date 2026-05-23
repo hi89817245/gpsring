@@ -154,13 +154,14 @@ def generate_csv_track(mode="normal"):
 
     return points
 
-def save_to_csv(filename, points):
+def save_to_csv(filename, points, ring_id="G0703-00001"):
     import csv
     with open(filename, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["seq", "timestamp", "lat", "lng", "alt", "speed_kmh", "heading", "hdop", "satellites", "battery_mv", "rssi"])
+        writer.writerow(["id", "seq", "timestamp", "lat", "lng", "alt", "speed_kmh", "heading", "hdop", "satellites", "battery_mv", "rssi"])
         for p in points:
             writer.writerow([
+                ring_id,
                 p["seq"], p["timestamp"], p["lat"], p["lng"], p["alt"],
                 p["speed_kmh"], p["heading"], p["hdop"], p["satellites"],
                 p["battery_mv"], p["rssi"]
@@ -172,14 +173,14 @@ if __name__ == "__main__":
     
     # 正常
     normal_pts = generate_csv_track("normal")
-    save_to_csv("templates/template_normal.csv", normal_pts)
+    save_to_csv("templates/template_normal.csv", normal_pts, "G0703-00001")
     
     # 作弊
     cheat_pts = generate_csv_track("cheat_highway")
-    save_to_csv("templates/template_cheat.csv", cheat_pts)
+    save_to_csv("templates/template_cheat.csv", cheat_pts, "G0703-CHEATER")
     
     # 滯留
     susp_pts = generate_csv_track("suspicious_ab")
-    save_to_csv("templates/template_suspicious.csv", susp_pts)
+    save_to_csv("templates/template_suspicious.csv", susp_pts, "G0703-AB_COTE")
     
     print("CSV Templates generated successfully in templates/")
