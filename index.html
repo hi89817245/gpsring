@@ -52,22 +52,52 @@ window.onerror = function(message, source, lineno, colno, error) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="alternate icon" href="/favicon.ico">
+    <style>
+        @keyframes fraudPulse { 0%,100% { filter: drop-shadow(0 0 4px #22d3ee); transform: scale(1); } 50% { filter: drop-shadow(0 0 14px #ef4444); transform: scale(1.06); } }
+        @keyframes scanSweep { 0% { transform: rotate(0deg); opacity: .45; } 100% { transform: rotate(360deg); opacity: .85; } }
+        .fraud-logo-svg { animation: fraudPulse 2.6s ease-in-out infinite; }
+        .fraud-logo-sweep { transform-origin: 32px 32px; animation: scanSweep 4s linear infinite; }
+        .drawer-body { transition: max-height .25s ease, opacity .2s ease; overflow: hidden; }
+        .drawer-collapsed .drawer-body { max-height: 0 !important; opacity: 0; pointer-events: none; }
+        .drawer-chevron { transition: transform .2s ease; }
+        .drawer-collapsed .drawer-chevron { transform: rotate(-90deg); }
+        .time-label-marker { pointer-events:none; }
+        .time-label-marker div { white-space: nowrap; text-shadow: 0 1px 2px #000; }
+    </style>
 </head>
 <body class="bg-gray-900 text-white min-h-screen flex flex-col">
 
     <!-- 頁首 -->
-    <header class="bg-gray-800 border-b border-gray-700 px-6 py-4 flex justify-between items-center">
-        <div class="flex items-center space-x-3">
-            <i class="fa-solid fa-dove text-teal-400 text-2xl"></i>
-            <h1 class="text-xl font-bold tracking-wider">GPS鴿環 (gpsring) <span class="text-teal-400 text-xs px-2 py-0.5 border border-teal-400 rounded-full">DEV PROTO</span></h1>
+    <header class="bg-gray-800 border-b border-gray-700 px-6 py-3 flex justify-between items-center gap-4">
+        <div class="flex items-center space-x-3 min-w-0">
+            <svg class="fraud-logo-svg w-12 h-12 shrink-0" viewBox="0 0 64 64" aria-label="作弊軌跡分析引擎 Logo">
+                <circle cx="32" cy="32" r="27" fill="#06121f" stroke="#22d3ee" stroke-width="2"/>
+                <path class="fraud-logo-sweep" d="M32 32 L32 7 A25 25 0 0 1 56 32 Z" fill="#22d3ee" opacity="0.22"/>
+                <path d="M12 40 C22 20 34 50 52 18" fill="none" stroke="#ef4444" stroke-width="3" stroke-linecap="round" stroke-dasharray="5 5"/>
+                <circle cx="20" cy="32" r="3" fill="#06b6d4"/><circle cx="36" cy="38" r="3" fill="#f97316"/><circle cx="49" cy="21" r="4" fill="#ef4444"/>
+                <path d="M22 18 q10 -8 20 0 q-8 1 -10 10 q-2 -9 -10 -10z" fill="#e2e8f0" opacity="0.9"/>
+            </svg>
+            <div class="min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <h1 id="brand-title" class="text-xl md:text-2xl font-black tracking-wider text-white">作弊軌跡分析引擎</h1>
+                    <span class="text-teal-400 text-xs px-2 py-0.5 border border-teal-400 rounded-full">DEV PROTO</span>
+                </div>
+                <div id="brand-subtitle" class="text-[11px] text-slate-400">GPS Ring Anti-Fraud Trajectory Engine</div>
+            </div>
         </div>
         <div class="text-sm text-gray-400 flex items-center space-x-4">
-            <div>
-                首選鴿會: <span class="text-teal-400 font-bold">0703 大鴻鴿會</span>
-            </div>
-            <div>
-                聯機狀態: <span class="text-green-400 font-semibold"><i class="fa-solid fa-circle-dot"></i> Live</span>
-            </div>
+            <label class="text-[11px] text-gray-400 flex items-center gap-2">Title
+                <select id="brand-title-select" onchange="applyBrandTitle(this.value, true)" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-teal-300 text-xs">
+                    <option value="作弊軌跡分析引擎">作弊軌跡分析引擎</option>
+                    <option value="鴿眼天網軌跡審判台">鴿眼天網軌跡審判台</option>
+                    <option value="北海賽鴿防弊雷達">北海賽鴿防弊雷達</option>
+                    <option value="GPS 鴿環物理鑑識中心">GPS 鴿環物理鑑識中心</option>
+                    <option value="鴿會反作弊戰情室">鴿會反作弊戰情室</option>
+                </select>
+            </label>
+            <button onclick="resetUiSettings()" class="text-[10px] px-2 py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300">重置設定</button>
+            <div>首選鴿會: <span class="text-teal-400 font-bold">0703 大鴻鴿會</span></div>
+            <div>聯機狀態: <span class="text-green-400 font-semibold"><i class="fa-solid fa-circle-dot"></i> Live</span></div>
         </div>
     </header>
 
@@ -77,8 +107,11 @@ window.onerror = function(message, source, lineno, colno, error) {
         <section class="w-full md:w-1/3 bg-gray-800 p-6 flex flex-col border-r border-gray-700 space-y-6 overflow-y-auto max-h-[85vh]">
             
             <!-- 數據源/模擬 -->
-            <div class="bg-gray-700/50 p-4 rounded-lg border border-gray-600 space-y-3">
-                <h3 class="text-sm font-semibold text-teal-400"><i class="fa-solid fa-gears mr-2"></i> 模擬控制台</h3>
+            <div id="simulation-drawer" class="bg-gray-700/50 p-4 rounded-lg border border-gray-600 space-y-3 drawer-collapsed">
+                <button onclick="toggleDrawer('simulation-drawer', true)" class="w-full flex items-center justify-between text-left text-sm font-semibold text-teal-400">
+                    <span><i class="fa-solid fa-gears mr-2"></i> 模擬控制台</span><i class="drawer-chevron fa-solid fa-chevron-down"></i>
+                </button>
+                <div class="drawer-body space-y-3" style="max-height: 760px;">
                 <div class="space-y-2">
                     <p class="text-xs text-gray-300">第一期測試：選擇一隻鴿子進行 GIS 軌跡載入：</p>
                     <div class="flex space-x-2">
@@ -146,14 +179,18 @@ window.onerror = function(message, source, lineno, colno, error) {
                         <div id="csv-upload-status" class="text-[10px] text-gray-400 italic"></div>
                     </form>
                 </div>
+                </div>
             </div>
 
             <!-- v0.3.0 規則 Help / 閥值設定 -->
-            <div id="rule-settings-panel" class="hidden bg-gray-700/30 p-4 rounded-lg border border-teal-900/50 space-y-3">
+            <div id="rule-settings-panel" class="hidden bg-gray-700/30 p-4 rounded-lg border border-teal-900/50 space-y-3 drawer-collapsed">
                 <div class="flex items-center justify-between border-b border-gray-600 pb-2">
-                    <h3 class="text-sm font-semibold text-teal-400"><i class="fa-solid fa-sliders mr-2"></i> 規則 Help / 閥值設定</h3>
-                    <button onclick="resetRuleProfile()" class="text-[10px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-gray-300">恢復預設</button>
+                    <button onclick="toggleDrawer('rule-settings-panel', true)" class="flex-1 flex items-center justify-between text-left text-sm font-semibold text-teal-400">
+                        <span><i class="fa-solid fa-sliders mr-2"></i> 規則 Help / 閥值設定</span><i class="drawer-chevron fa-solid fa-chevron-down"></i>
+                    </button>
+                    <button onclick="resetRuleProfile()" class="ml-2 text-[10px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-gray-300">恢復預設</button>
                 </div>
+                <div class="drawer-body space-y-3" style="max-height: 420px;">
                 <div class="grid grid-cols-2 gap-2 text-[10px]">
                     <label class="space-y-1"><span class="text-gray-400">連續路廊門檻 km</span><input id="rule-min-corridor-km" type="number" min="1" max="200" step="1" value="20" onchange="applyRuleProfile()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-teal-300 font-mono"></label>
                     <label class="space-y-1"><span class="text-gray-400">高速路廊距離 m</span><input id="rule-hwy-distance-m" type="number" min="50" max="5000" step="50" value="900" onchange="applyRuleProfile()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-teal-300 font-mono"></label>
@@ -164,6 +201,7 @@ window.onerror = function(message, source, lineno, colno, error) {
                 </div>
                 <div class="text-[10px] text-gray-400 leading-relaxed bg-slate-950/60 border border-slate-800 rounded p-2">
                     <b class="text-teal-300">GPS-R03/R04：</b>短暫貼近高速/高鐵只列為 partial/review；必須連續達 <span id="rule-help-km" class="text-white font-mono">20</span>km 才升級高危。
+                </div>
                 </div>
             </div>
 
@@ -193,19 +231,16 @@ window.onerror = function(message, source, lineno, colno, error) {
                     <button onclick="clearAnomalyFilters()" class="text-[10px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-gray-300">清除</button>
                 </div>
                 <div class="grid grid-cols-2 gap-2 text-[10px]">
-                    <label class="space-y-1"><span class="text-gray-400">起始時間</span><input id="filter-start-time" type="datetime-local" onchange="applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
-                    <label class="space-y-1"><span class="text-gray-400">結束時間</span><input id="filter-end-time" type="datetime-local" onchange="applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
-                    <label class="space-y-1"><span class="text-gray-400">最低高度 m</span><input id="filter-min-alt" type="number" step="10" placeholder="不限" onchange="applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
-                    <label class="space-y-1"><span class="text-gray-400">最高高度 m</span><input id="filter-max-alt" type="number" step="10" placeholder="不限" onchange="applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
-                    <label class="space-y-1"><span class="text-gray-400">最低速度 km/h</span><input id="filter-min-speed" type="number" step="1" placeholder="不限" onchange="applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
-                    <label class="space-y-1"><span class="text-gray-400">風險等級</span><select id="filter-status" onchange="applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200"><option value="ALL">全部</option><option value="ANOMALY">只看異常</option><option value="CRITICAL_FRAUD">🔴 高危</option><option value="SUSPICIOUS">🟠 複核</option><option value="GPS_FAULT">🟣 GPS 疑慮</option><option value="PASS">🟢 正常</option></select></label>
-                    <label class="space-y-1 col-span-2"><span class="text-gray-400">規則碼/關鍵字</span><input id="filter-rule" type="text" placeholder="例：GPS-R03 / GPS-R08 / 高鐵" oninput="applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">起始時間</span><input id="filter-start-time" type="datetime-local" onfocus="primeDateTimeDefault('filter-start-time')" onchange="persistUiSettings(); applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">結束時間</span><input id="filter-end-time" type="datetime-local" onfocus="primeDateTimeDefault('filter-end-time')" onchange="persistUiSettings(); applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">最低高度 m</span><input id="filter-min-alt" type="number" step="10" placeholder="不限" onchange="persistUiSettings(); applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">最高高度 m</span><input id="filter-max-alt" type="number" step="10" placeholder="不限" onchange="persistUiSettings(); applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">最低速度 km/h</span><input id="filter-min-speed" type="number" step="1" placeholder="不限" onchange="persistUiSettings(); applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">風險等級</span><select id="filter-status" onchange="persistUiSettings(); applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200"><option value="ALL">全部</option><option value="ANOMALY">只看異常</option><option value="CRITICAL_FRAUD">🔴 高危</option><option value="SUSPICIOUS">🟠 複核</option><option value="GPS_FAULT">🟣 GPS 疑慮</option><option value="PASS">🟢 正常</option></select></label>
+                    <label class="space-y-1 col-span-2"><span class="text-gray-400">規則碼/關鍵字</span><input id="filter-rule" type="text" placeholder="例：GPS-R03 / GPS-R08 / 高鐵" oninput="persistUiSettings(); applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
                 </div>
-                <div id="time-alt-summary" class="text-[10px] text-gray-400 bg-slate-950/50 border border-slate-800 rounded p-2">尚未載入軌跡。</div>
-                <div class="space-y-1">
-                    <div class="flex justify-between text-[10px] text-gray-400"><span>高度/時間小窗 (點擊小格可定位)</span><span id="filter-count-badge" class="text-cyan-300 font-mono">0/0</span></div>
-                    <div id="time-alt-window" class="h-20 overflow-x-auto overflow-y-hidden bg-slate-950/70 rounded border border-slate-800 flex items-end gap-[2px] px-2 py-2"></div>
-                </div>
+                <div class="text-[10px] text-gray-400 bg-slate-950/50 border border-slate-800 rounded p-2">起訖時間空白時，第一次點入會自動帶入今日 07:00 / 15:00。</div>
+                <div class="text-[10px] text-slate-500 border border-slate-800 rounded p-2 bg-slate-950/30">曲線小窗已移到地圖右下角，可切換高度/速度/雙軸，比左側表單更像戰情室。</div>
                 <div id="filtered-anomaly-list" class="max-h-40 overflow-y-auto space-y-1 text-[10px]"></div>
             </div>
 
@@ -273,6 +308,27 @@ window.onerror = function(message, source, lineno, colno, error) {
         <section class="flex-1 relative min-h-[500px]">
             <div id="map" class="absolute inset-0 bg-gray-950"></div>
             
+            <!-- 右下角高度/速度曲線戰情小窗 -->
+            <div id="telemetry-window-panel" class="absolute bottom-6 right-6 z-[1000] w-[420px] max-w-[46vw] bg-gray-950/92 border border-cyan-900/70 p-3 rounded-xl shadow-2xl text-xs space-y-2 backdrop-blur">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                    <div class="font-bold text-cyan-300"><i class="fa-solid fa-chart-line mr-1"></i> 高度/速度時間窗</div>
+                    <div class="flex items-center gap-2">
+                        <span id="filter-count-badge" class="text-cyan-300 font-mono">0/0</span>
+                        <select id="telemetry-metric" onchange="persistUiSettings(); renderTimeAltWindow(lastEvaluatedPoints, applyPointFilters(lastEvaluatedPoints))" class="bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-[10px] text-cyan-200">
+                            <option value="both">高度+速度</option>
+                            <option value="alt">只看高度</option>
+                            <option value="speed">只看速度</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="time-alt-summary" class="text-[10px] text-gray-400 bg-slate-900/70 border border-slate-800 rounded p-2">尚未載入軌跡。</div>
+                <div class="text-[10px] text-gray-400">小格=高度，折線=速度；點擊任一小格可定位。</div>
+                <div id="time-alt-window" class="relative h-28 overflow-x-auto overflow-y-hidden bg-slate-950/90 rounded border border-slate-800 px-2 py-2">
+                    <div id="time-alt-bars" class="relative z-10 h-full flex items-end gap-[2px]"></div>
+                    <svg id="speed-curve-svg" class="absolute inset-0 w-full h-full pointer-events-none z-20"></svg>
+                </div>
+            </div>
+
             <!-- 圖例與地圖控制浮動面板 -->
             <div class="absolute bottom-6 left-6 z-[1000] bg-gray-950/90 border border-gray-700 p-4 rounded-lg shadow-2xl text-xs space-y-2">
                 <h4 class="font-bold border-b border-gray-800 pb-1 mb-2 text-teal-400"><i class="fa-solid fa-map-location-dot mr-1"></i> GIS 圖例</h4>
@@ -344,30 +400,28 @@ window.onerror = function(message, source, lineno, colno, error) {
 
         // 載入 8 個放飛關卡的官方放飛點與當日海象氣象資訊
         const releaseStages = [
-            { name: "資格一放飛點", lat: 25.835123, lng: 122.01416, date: "2026-03-22 07:00", distance: "基隆港外海約 60 公里", weather: "東北風 (NE) 5級 / 浪高 1.5 米 / 能見度 12km" },
-            { name: "資格二放飛點", lat: 25.835123, lng: 121.799927, date: "2026-03-25 07:00", distance: "基隆港外海約 80 公里", weather: "東北風 (NE) 5-6級 / 浪高 2.0 米 / 能見度 10km" },
-            { name: "第一關放飛點", lat: 26.0667, lng: 122.8, date: "2026-03-29 07:00", distance: "北海第一關約 120 公里", weather: "東北風 (NE) 6級 / 浪高 2.5 米 / 能見度 15km" },
-            { name: "第二關放飛點", lat: 26.6333, lng: 122.5833, date: "2026-04-01 07:00", distance: "北海第二關約 150 公里", weather: "東北風 (NE) 6-7級 / 浪高 3.0 米 / 能見度 8km" },
-            { name: "第三關放飛點", lat: 26.4667, lng: 123.2333, date: "2026-04-05 07:00", distance: "北海第三關約 180 公里", weather: "偏東風 (E) 5級 / 浪高 1.8 米 / 能見度 14km" },
-            { name: "第四關放飛點", lat: 26.9667, lng: 123.1333, date: "2026-04-08 07:00", distance: "北海第四關約 210 公里", weather: "東北風 (NE) 7級 / 浪高 3.5 米 / 能見度 10km" },
-            { name: "第五關放飛點", lat: 27.35, lng: 123.05, date: "2026-04-12 07:00", distance: "北海第五關約 240 公里", weather: "東北風 (NE) 6級 / 浪高 2.8 米 / 能見度 12km" },
-            { name: "第六關放飛點", lat: 27.1833, lng: 123.6833, date: "2026-04-15 07:00", distance: "北海第六關約 270 公里", weather: "東北風 (NE) 5-6級 / 浪高 2.2 米 / 能見度 15km" }
+            { label: "資格1", name: "資格1放飛點", lat: 25.835123, lng: 122.01416, date: "2026-03-22 07:00", distance: "基隆港外海約 60 公里", weather: "東北風 (NE) 5級 / 浪高 1.5 米 / 能見度 12km" },
+            { label: "資格2", name: "資格2放飛點", lat: 25.835123, lng: 121.799927, date: "2026-03-25 07:00", distance: "基隆港外海約 80 公里", weather: "東北風 (NE) 5-6級 / 浪高 2.0 米 / 能見度 10km" },
+            { label: "1關", name: "1關放飛點", lat: 26.0667, lng: 122.8, date: "2026-03-29 07:00", distance: "北海第1關約 120 公里", weather: "東北風 (NE) 6級 / 浪高 2.5 米 / 能見度 15km" },
+            { label: "2關", name: "2關放飛點", lat: 26.6333, lng: 122.5833, date: "2026-04-01 07:00", distance: "北海第2關約 150 公里", weather: "東北風 (NE) 6-7級 / 浪高 3.0 米 / 能見度 8km" },
+            { label: "3關", name: "3關放飛點", lat: 26.4667, lng: 123.2333, date: "2026-04-05 07:00", distance: "北海第3關約 180 公里", weather: "偏東風 (E) 5級 / 浪高 1.8 米 / 能見度 14km" },
+            { label: "4關", name: "4關放飛點", lat: 26.9667, lng: 123.1333, date: "2026-04-08 07:00", distance: "北海第4關約 210 公里", weather: "東北風 (NE) 7級 / 浪高 3.5 米 / 能見度 10km" },
+            { label: "5關", name: "5關放飛點", lat: 27.35, lng: 123.05, date: "2026-04-12 07:00", distance: "北海第5關約 240 公里", weather: "東北風 (NE) 6級 / 浪高 2.8 米 / 能見度 12km" },
+            { label: "6關", name: "6關放飛點", lat: 27.1833, lng: 123.6833, date: "2026-04-15 07:00", distance: "北海第6關約 270 公里", weather: "東北風 (NE) 5-6級 / 浪高 2.2 米 / 能見度 15km" }
         ];
 
-        releaseStages.forEach(stage => {
-            // 使用黃色船錨標記代表海域放飛點
-            const anchorMarker = L.circleMarker([stage.lat, stage.lng], {
-                radius: 7,
-                fillColor: "#eab308", // Tailwind Yellow-500
-                color: "#ffffff",
-                weight: 1.5,
-                fillOpacity: 0.95
+        releaseStages.forEach((stage, idx) => {
+            const shipIcon = L.divIcon({
+                className: 'release-ship-marker',
+                html: `<div class="relative flex items-center justify-center w-10 h-10 rounded-full bg-yellow-500/20 border-2 border-yellow-300 shadow-lg shadow-yellow-900/50 text-xl">🚢<span class="absolute -bottom-1 -right-1 text-[10px] bg-slate-950 border border-yellow-400 text-yellow-200 rounded px-1">${stage.label}</span></div>`,
+                iconSize: [40, 40],
+                iconAnchor: [20, 20]
             });
-            
+            const shipMarker = L.marker([stage.lat, stage.lng], { icon: shipIcon });
             const popupHtml = `
-                <div class="text-[11px] p-2 bg-slate-950 text-slate-100 rounded border border-yellow-500/50 min-w-[200px]">
+                <div class="text-[11px] p-2 bg-slate-950 text-slate-100 rounded border border-yellow-500/50 min-w-[210px]">
                     <div class="font-bold text-yellow-400 border-b border-yellow-500/20 pb-1 mb-1.5 flex items-center">
-                        <i class="fa-solid fa-anchor mr-1.5 text-yellow-500"></i> ${stage.name}
+                        🚢 ${stage.name} / ${stage.label}
                     </div>
                     <div class="space-y-1">
                         <div><b>📅 放飛時間:</b> ${stage.date}</div>
@@ -377,9 +431,9 @@ window.onerror = function(message, source, lineno, colno, error) {
                     </div>
                 </div>
             `;
-            anchorMarker.bindPopup(popupHtml);
-            anchorMarker.bindTooltip(stage.name, { direction: "top", sticky: true });
-            releasePointsGroup.addLayer(anchorMarker);
+            shipMarker.bindPopup(popupHtml);
+            shipMarker.bindTooltip(`🚢 ${stage.label}｜${stage.name}`, { direction: "top", sticky: true });
+            releasePointsGroup.addLayer(shipMarker);
         });
 
         // 用於存放所有繪製的 GPS 定位點 Marker
@@ -513,6 +567,7 @@ window.onerror = function(message, source, lineno, colno, error) {
         }
 
         window.addEventListener('DOMContentLoaded', () => {
+            restoreUiSettings();
             updateTemplateLink();
             
             // 支援 NFC 快速載入
@@ -544,6 +599,131 @@ window.onerror = function(message, source, lineno, colno, error) {
         let lastEvaluatedPoints = [];
         let trackMarkerIndex = {};
         let selectedTrackSeq = null;
+        const UI_STORAGE_KEY = 'gpsring_v032_ui_settings';
+        const timeLabelsGroup = L.layerGroup().addTo(map);
+
+
+        const brandTitleOptions = {
+            "作弊軌跡分析引擎": "GPS Ring Anti-Fraud Trajectory Engine",
+            "鴿眼天網軌跡審判台": "Pigeon-Eye Skynet Forensics Console",
+            "北海賽鴿防弊雷達": "North-Sea Racing Pigeon Anti-Fraud Radar",
+            "GPS 鴿環物理鑑識中心": "GPS Ring Physics Forensics Center",
+            "鴿會反作弊戰情室": "Racing Club Anti-Cheat War Room"
+        };
+
+        function getUiSettings() {
+            try { return JSON.parse(localStorage.getItem(UI_STORAGE_KEY) || '{}'); } catch (_) { return {}; }
+        }
+
+        function persistUiSettings() {
+            const settings = getUiSettings();
+            settings.brandTitle = document.getElementById('brand-title-select')?.value || settings.brandTitle;
+            settings.telemetryMetric = document.getElementById('telemetry-metric')?.value || settings.telemetryMetric;
+            settings.filters = {
+                start: document.getElementById('filter-start-time')?.value || '',
+                end: document.getElementById('filter-end-time')?.value || '',
+                minAlt: document.getElementById('filter-min-alt')?.value || '',
+                maxAlt: document.getElementById('filter-max-alt')?.value || '',
+                minSpeed: document.getElementById('filter-min-speed')?.value || '',
+                status: document.getElementById('filter-status')?.value || 'ALL',
+                keyword: document.getElementById('filter-rule')?.value || ''
+            };
+            localStorage.setItem(UI_STORAGE_KEY, JSON.stringify(settings));
+        }
+
+        function applyBrandTitle(title, persist=false) {
+            const selected = brandTitleOptions[title] ? title : '作弊軌跡分析引擎';
+            const titleEl = document.getElementById('brand-title');
+            const subEl = document.getElementById('brand-subtitle');
+            const sel = document.getElementById('brand-title-select');
+            if (titleEl) titleEl.innerText = selected;
+            if (subEl) subEl.innerText = brandTitleOptions[selected];
+            if (sel) sel.value = selected;
+            document.title = `${selected}｜GPS 鴿環 GIS`;
+            if (persist) persistUiSettings();
+        }
+
+        function toggleDrawer(id, persist=false) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.classList.toggle('drawer-collapsed');
+            if (persist) {
+                const settings = getUiSettings();
+                settings.drawers = settings.drawers || {};
+                settings.drawers[id] = !el.classList.contains('drawer-collapsed');
+                localStorage.setItem(UI_STORAGE_KEY, JSON.stringify(settings));
+            }
+        }
+
+        function restoreUiSettings() {
+            const settings = getUiSettings();
+            applyBrandTitle(settings.brandTitle || '作弊軌跡分析引擎', false);
+            ['simulation-drawer', 'rule-settings-panel'].forEach(id => document.getElementById(id)?.classList.add('drawer-collapsed'));
+            if (settings.drawers) {
+                ['simulation-drawer', 'rule-settings-panel'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el && settings.drawers[id]) el.classList.remove('drawer-collapsed');
+                });
+            }
+            if (settings.filters) {
+                const map = {
+                    'filter-start-time': settings.filters.start,
+                    'filter-end-time': settings.filters.end,
+                    'filter-min-alt': settings.filters.minAlt,
+                    'filter-max-alt': settings.filters.maxAlt,
+                    'filter-min-speed': settings.filters.minSpeed,
+                    'filter-status': settings.filters.status,
+                    'filter-rule': settings.filters.keyword
+                };
+                Object.entries(map).forEach(([id, val]) => { const el = document.getElementById(id); if (el && val !== undefined) el.value = val; });
+            }
+            if (settings.ruleProfile) {
+                const ruleMap = {
+                    'rule-min-corridor-km': settings.ruleProfile.min_corridor_match_km,
+                    'rule-hwy-distance-m': settings.ruleProfile.highway_corridor_distance_m,
+                    'rule-hsr-distance-m': settings.ruleProfile.hsr_corridor_distance_m,
+                    'rule-ground-alt-m': settings.ruleProfile.ground_altitude_max_m,
+                    'rule-hwy-speed-kmh': settings.ruleProfile.highway_speed_min_kmh,
+                    'rule-hsr-speed-kmh': settings.ruleProfile.hsr_speed_min_kmh
+                };
+                Object.entries(ruleMap).forEach(([id, val]) => { const el = document.getElementById(id); if (el && val !== undefined) el.value = val; });
+            }
+            const metric = document.getElementById('telemetry-metric');
+            if (metric && settings.telemetryMetric) metric.value = settings.telemetryMetric;
+            const helpKm = document.getElementById('rule-help-km');
+            const corridorKm = document.getElementById('rule-min-corridor-km')?.value;
+            if (helpKm && corridorKm) helpKm.innerText = corridorKm;
+        }
+
+        function resetUiSettings() {
+            localStorage.removeItem(UI_STORAGE_KEY);
+            applyBrandTitle('作弊軌跡分析引擎', false);
+            ['simulation-drawer', 'rule-settings-panel'].forEach(id => document.getElementById(id)?.classList.add('drawer-collapsed'));
+            clearAnomalyFilters();
+            resetRuleProfile();
+            const metric = document.getElementById('telemetry-metric');
+            if (metric) metric.value = 'both';
+            renderTimeAltWindow(lastEvaluatedPoints, applyPointFilters(lastEvaluatedPoints));
+        }
+
+        function todayDateTimeLocal(hour, minute=0) {
+            const d = new Date();
+            d.setHours(hour, minute, 0, 0);
+            const pad = n => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
+
+        function primeDateTimeDefault(id) {
+            const el = document.getElementById(id);
+            if (!el || el.value) return;
+            el.value = id === 'filter-start-time' ? todayDateTimeLocal(7, 0) : todayDateTimeLocal(15, 0);
+            persistUiSettings();
+        }
+
+        function formatMinuteSecond(ts) {
+            const d = new Date(ts * 1000);
+            return d.toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, minute: '2-digit', second: '2-digit' });
+        }
 
         function toTaipeiLocalInputValue(ts) {
             if (!ts) return "";
@@ -606,6 +786,7 @@ window.onerror = function(message, source, lineno, colno, error) {
             });
             const status = document.getElementById('filter-status');
             if (status) status.value = 'ALL';
+            persistUiSettings();
             applyAnomalyFilters();
         }
 
@@ -623,40 +804,63 @@ window.onerror = function(message, source, lineno, colno, error) {
 
         function renderTimeAltWindow(allPoints, displayPoints) {
             const win = document.getElementById('time-alt-window');
+            const bars = document.getElementById('time-alt-bars');
+            const svg = document.getElementById('speed-curve-svg');
             const summary = document.getElementById('time-alt-summary');
             const list = document.getElementById('filtered-anomaly-list');
             const badge = document.getElementById('filter-count-badge');
-            if (!win || !summary || !list || !badge) return;
+            if (!win || !bars || !svg || !summary || !list || !badge) return;
             const shownSeqs = new Set(displayPoints.map(p => String(p.seq)));
+            const metric = document.getElementById('telemetry-metric')?.value || 'both';
             badge.innerText = `${displayPoints.length}/${allPoints.length}`;
             if (!allPoints.length) {
                 summary.innerText = '尚未載入軌跡。';
-                win.innerHTML = '';
+                bars.innerHTML = '';
+                svg.innerHTML = '';
                 list.innerHTML = '';
                 return;
             }
             const tsValues = allPoints.map(p => parseInt(p.timestamp || 0)).filter(Boolean);
             const altValues = allPoints.map(p => parseFloat(p.alt || 0));
+            const speedValues = allPoints.map(p => parseFloat(p.speed_kmh || 0));
             const minTs = Math.min(...tsValues), maxTs = Math.max(...tsValues);
             const minAlt = Math.min(...altValues), maxAlt = Math.max(...altValues);
+            const minSpeed = Math.min(...speedValues), maxSpeed = Math.max(...speedValues);
             const startText = new Date(minTs * 1000).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
             const endText = new Date(maxTs * 1000).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
             const anomalies = allPoints.filter(p => (p.status || 'PASS') !== 'PASS').length;
-            summary.innerHTML = `時間窗：<b class="text-cyan-200">${startText}</b> → <b class="text-cyan-200">${endText}</b>；高度 ${minAlt.toFixed(0)}–${maxAlt.toFixed(0)}m；異常 ${anomalies} 點。`;
-            const denom = Math.max(1, maxAlt - minAlt);
-            win.innerHTML = allPoints.map(p => {
+            summary.innerHTML = `時間窗：<b class="text-cyan-200">${startText}</b> → <b class="text-cyan-200">${endText}</b>；高度 ${minAlt.toFixed(0)}–${maxAlt.toFixed(0)}m；速度 ${minSpeed.toFixed(1)}–${maxSpeed.toFixed(1)}km/h；異常 ${anomalies} 點。`;
+            const altDenom = Math.max(1, maxAlt - minAlt);
+            const speedDenom = Math.max(1, maxSpeed - minSpeed);
+            bars.innerHTML = allPoints.map(p => {
                 const visible = shownSeqs.has(String(p.seq));
-                const h = 12 + Math.round(((parseFloat(p.alt || 0) - minAlt) / denom) * 56);
+                const altH = 12 + Math.round(((parseFloat(p.alt || 0) - minAlt) / altDenom) * 70);
+                const speedH = 12 + Math.round(((parseFloat(p.speed_kmh || 0) - minSpeed) / speedDenom) * 70);
+                const h = metric === 'speed' ? speedH : altH;
                 const color = p.status === 'CRITICAL_FRAUD' ? '#ef4444' : (p.status === 'SUSPICIOUS' ? '#f97316' : (p.status === 'GPS_FAULT' ? '#a855f7' : '#06b6d4'));
                 const selected = String(p.seq) === String(selectedTrackSeq);
-                return `<button title="點 #${p.seq}｜${p.alt}m｜${p.speed_kmh}km/h｜${statusChip(p.status)}" onclick="focusTrackPoint(${p.seq})" class="shrink-0 w-2 rounded-t transition-all ${visible ? '' : 'opacity-20 grayscale'} ${selected ? 'ring-2 ring-white' : ''}" style="height:${h}px;background:${color}"></button>`;
+                const label = metric === 'speed' ? `${p.speed_kmh}km/h` : `${p.alt}m`;
+                return `<button title="點 #${p.seq}｜高度 ${p.alt}m｜速度 ${p.speed_kmh}km/h｜${statusChip(p.status)}" onclick="focusTrackPoint(${p.seq})" class="shrink-0 w-2 rounded-t transition-all ${visible ? '' : 'opacity-20 grayscale'} ${selected ? 'ring-2 ring-white' : ''}" style="height:${h}px;background:${color}" aria-label="${label}"></button>`;
             }).join('');
+            if (metric === 'speed' || metric === 'both') {
+                const width = Math.max(360, allPoints.length * 10);
+                const height = 96;
+                const pts = allPoints.map((p, idx) => {
+                    const x = 8 + idx * ((width - 16) / Math.max(1, allPoints.length - 1));
+                    const y = height - 12 - ((parseFloat(p.speed_kmh || 0) - minSpeed) / speedDenom) * (height - 24);
+                    return `${x.toFixed(1)},${y.toFixed(1)}`;
+                }).join(' ');
+                svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+                svg.innerHTML = `<polyline points="${pts}" fill="none" stroke="#facc15" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/><text x="8" y="12" fill="#facc15" font-size="10">速度 km/h</text>`;
+            } else {
+                svg.innerHTML = '';
+            }
             const interesting = displayPoints.filter(p => (p.status || 'PASS') !== 'PASS').slice(0, 30);
             if (!interesting.length) {
                 list.innerHTML = '<div class="text-gray-500 border border-slate-800 rounded p-2 bg-slate-950/40">目前篩選條件下沒有異常點。</div>';
             } else {
                 list.innerHTML = interesting.map(p => {
-                    const t = new Date(p.timestamp * 1000).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
+                    const t = formatMinuteSecond(p.timestamp);
                     return `<button onclick="focusTrackPoint(${p.seq})" class="w-full text-left bg-slate-950/50 hover:bg-slate-800 border border-slate-800 rounded p-2">
                         <div class="flex justify-between"><b class="text-cyan-200">#${p.seq} ${statusChip(p.status)}</b><span class="font-mono text-gray-500">${t}</span></div>
                         <div class="text-gray-400">${p.alt}m｜${p.speed_kmh}km/h｜${p.rule_code || '-'}</div>
@@ -699,6 +903,9 @@ window.onerror = function(message, source, lineno, colno, error) {
 
         function applyRuleProfile() {
             currentRuleProfile = readRuleProfileFromUI();
+            const settings = getUiSettings();
+            settings.ruleProfile = currentRuleProfile;
+            localStorage.setItem(UI_STORAGE_KEY, JSON.stringify(settings));
             const helpKm = document.getElementById('rule-help-km');
             if (helpKm) helpKm.innerText = currentRuleProfile.min_corridor_match_km;
             if (activePoints.length > 0) evaluateAndRenderSandbox(false);
@@ -1218,6 +1425,7 @@ window.onerror = function(message, source, lineno, colno, error) {
                 pathLine = null;
             }
             gpsMarkersGroup.clearLayers();
+            timeLabelsGroup.clearLayers();
 
             const segments = [];
             let currentSegment = [];
@@ -1366,6 +1574,17 @@ window.onerror = function(message, source, lineno, colno, error) {
                 marker.bindTooltip(`ID:${document.getElementById('val-device')?.innerText || '-'}｜點 #${p.seq}｜${timeStr}｜${p.speed_kmh} km/h｜${p.alt}m｜${statusLabel}${p.rule_code ? '｜' + p.rule_code : ''}`, { direction: "top", sticky: true });
                 gpsMarkersGroup.addLayer(marker);
                 trackMarkerIndex[String(p.seq)] = marker;
+                const mmss = formatMinuteSecond(p.timestamp);
+                const timeLabel = L.marker([p.lat, p.lng], {
+                    icon: L.divIcon({
+                        className: 'time-label-marker',
+                        html: `<div class="text-[10px] font-bold px-1 py-0.5 rounded bg-slate-950/75 border border-slate-700 text-cyan-100">${mmss}</div>`,
+                        iconSize: [42, 16],
+                        iconAnchor: [-8, 22]
+                    }),
+                    interactive: false
+                });
+                timeLabelsGroup.addLayer(timeLabel);
             });
 
             // 5. 自動自適應縮放
@@ -1454,9 +1673,9 @@ async function uploadCSV(event) {
             GPS鴿環 GIS 系統 &copy; 2026. 苗栗頭份大鴻鴿會 專用防弊系統.
         </div>
         <div class="mt-1 flex justify-center items-center space-x-2 text-teal-400">
-            <span>版本：<span class="font-mono">v0.3.1</span></span>
+            <span>版本：<span class="font-mono">v0.3.2</span></span>
             <span class="text-gray-600">|</span>
-            <span>版名：<span class="font-bold">「高度時間窗與異常篩選版」(Altitude-Time Window & Anomaly Filters)</span></span>
+            <span>版名：<span class="font-bold">「作弊軌跡分析引擎品牌戰情版」(Anti-Fraud Engine War Room)</span></span>
         </div>
     </footer>
 </body>

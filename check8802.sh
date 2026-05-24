@@ -7,16 +7,16 @@ PORT_WEB=8802
 echo "=== [check8802] 鴿環測試服務狀態診斷 ==="
 
 # 1. 檢查 API (8801)
-if ss -tuln | grep -q ":${PORT_API} "; then
-    PID_API=$(lsof -t -i:${PORT_API})
+PID_API=$(lsof -nP -t -iTCP:${PORT_API} -sTCP:LISTEN 2>/dev/null | head -n 1)
+if [ -n "${PID_API}" ]; then
     echo "✅ API 服務 (Port ${PORT_API}): 在線中 (PID: ${PID_API})"
 else
     echo "❌ API 服務 (Port ${PORT_API}): 離線！"
 fi
 
 # 2. 檢查 Web 前端 (8802)
-if ss -tuln | grep -q ":${PORT_WEB} "; then
-    PID_WEB=$(lsof -t -i:${PORT_WEB})
+PID_WEB=$(lsof -nP -t -iTCP:${PORT_WEB} -sTCP:LISTEN 2>/dev/null | head -n 1)
+if [ -n "${PID_WEB}" ]; then
     echo "✅ Web 服務 (Port ${PORT_WEB}): 在線中 (PID: ${PID_WEB})"
 else
     echo "❌ Web 服務 (Port ${PORT_WEB}): 離線！"
