@@ -63,6 +63,7 @@ window.onerror = function(message, source, lineno, colno, error) {
         .drawer-collapsed .drawer-chevron { transform: rotate(-90deg); }
         .time-label-marker { pointer-events:none; }
         .time-label-marker div { white-space: nowrap; text-shadow: 0 1px 2px #000; }
+        .release-stage-badge { transform: translate(-50%, -100%); white-space: nowrap; text-shadow: 0 1px 2px #000; }
     </style>
 </head>
 <body class="bg-gray-900 text-white min-h-screen flex flex-col">
@@ -413,7 +414,7 @@ window.onerror = function(message, source, lineno, colno, error) {
         releaseStages.forEach((stage, idx) => {
             const shipIcon = L.divIcon({
                 className: 'release-ship-marker',
-                html: `<div class="relative flex items-center justify-center w-10 h-10 rounded-full bg-yellow-500/20 border-2 border-yellow-300 shadow-lg shadow-yellow-900/50 text-xl">🚢<span class="absolute -bottom-1 -right-1 text-[10px] bg-slate-950 border border-yellow-400 text-yellow-200 rounded px-1">${stage.label}</span></div>`,
+                html: `<div class="relative flex items-center justify-center w-10 h-10 rounded-full bg-yellow-500/20 border-2 border-yellow-300 shadow-lg shadow-yellow-900/50 text-xl"><span class="release-stage-badge absolute left-1/2 -top-1 text-[10px] bg-slate-950/90 border border-yellow-400 text-yellow-100 rounded px-1.5 py-0.5 font-bold">${stage.label}</span>🚢</div>`,
                 iconSize: [40, 40],
                 iconAnchor: [20, 20]
             });
@@ -1673,9 +1674,9 @@ async function uploadCSV(event) {
             GPS鴿環 GIS 系統 &copy; 2026. 苗栗頭份大鴻鴿會 專用防弊系統.
         </div>
         <div class="mt-1 flex justify-center items-center space-x-2 text-teal-400">
-            <span>版本：<span class="font-mono">v0.3.2</span></span>
+            <span>版本：<span class="font-mono">v0.3.3</span></span>
             <span class="text-gray-600">|</span>
-            <span>版名：<span class="font-bold">「作弊軌跡分析引擎品牌戰情版」(Anti-Fraud Engine War Room)</span></span>
+            <span>版名：<span class="font-bold">「船標籤與生命週期手冊版」(Lifecycle Manual Release)</span></span>
         </div>
     </footer>
 </body>

@@ -92,4 +92,18 @@ A：載入任一軌跡後，展開左側「高度/時間小窗與異常篩選器
 
 ### Q24：演算法與韌體文件是否同步？
 A：已更新 `物理防弊演算法.md`，納入 20km 可調閥值、擄鴿 30 分鐘、A/B 舍 10 分鐘、GPS-R08/R09/R10 與高度/篩選驗收。已更新 `FIRMWARE.md`，納入 `init / caring / start` 韌體狀態機與 ESPConnect `.bin` OTA 上傳說明；`.ino` 是原始碼，`.bin` 是燒錄/OTA 韌體，`.ico` 是網站圖示不是韌體。
+### Q26：船圖示上的關卡文字會擋住圖示嗎？
+A：v0.3.3 已把放飛船標籤移到船圖示正上方，保留 `資格1 → 資格2 → 1關 → 2關...` 順序，讓船圖示本體更清楚。
+
+### Q27：DIY GPS 鴿環到貨後要怎麼開始？
+A：已新增 `安裝GPS鴿環手冊.md`。流程從 Windows/USB Type-C/Arduino IDE 或 PlatformIO/esptool 燒錄開始，接著檢查 GPS、電池、Flash、NFC、Wi-Fi/BLE/USB/OTA，最後跑正式賽季 loop：上一關上傳確認 → 清除資料 → 重新配對 → init → caring → start → stop/end → upload → 下一關。
+
+### Q28：韌體狀態是否只有 init/caring/start？
+A：不只。正式設計應是 `init → caring → start → stop/end → upload`。歸返時 NFC/踏板/巨石鴿鐘可觸發 `end`；若電量仍有 10% 以上可自動上傳，傳到一半也沒關係，後台標示 partial，回鴿會插電後續傳。
+
+### Q29：壓力測試要怎麼規劃？
+A：先用 n=100 模擬 1 分鐘內集中歸返上傳，每台 96 點（300 秒採樣）或 2880 點（10 秒高頻）。API 應快速回 `202 + job_id`，背景 worker 再解析與分析；觀察 CPU、RAM、HDD/SSD I/O、DB lock、API p95 latency 與完整分析耗時。
+
+### Q30：工程車/車隊等非防弊用途要現在做嗎？
+A：先不要展開成大系統。GPSRing 主線先完善，但資料模型應預留 `device_type`、tenant/group、feature flags。未來可讓工程車、車隊、資產追蹤共用定位平台；差別是 GPS 鴿環啟用 anti_fraud，工程車偏 realtime tracking 與 QR 免登入分群。
 

@@ -390,5 +390,8 @@ v0.3.3：segment event 與賽程鑑識報告版
 2. 篩選器新增 HDOP、衛星數、連續路廊距離、滯留分鐘數、event type 欄位。
 3. 增加一鍵「產生賽後鑑識報告」：可匯出 PDF/HTML，列出可疑區段、地圖截圖、規則碼與人工複核建議。
 4. 做賽事設定檔：放飛關卡、鴿舍座標、比賽開始/截止時間、天候/海象資料可切換。
-5. 補韌體/硬體資料契約：CSV/JSON schema、離線快取、USB/Wi-Fi/BLE/4G 上傳格式與 ESPConnect/OTA 流程。
-6. 針對 8 小時續航做資料頻率策略：10s/30s/60s 動態採樣與異常時高頻模式。
+5. 依 `安裝GPS鴿環手冊.md` 實作韌體生命週期：`init → caring → start → stop/end → upload`，包含 NFC 歸返觸發、10% 電量門檻、partial/resume upload。
+6. 建立壓測腳本：預設 n=100 個 GPS 鴿環於 1 分鐘內同時 upload，觀察 CPU/RAM/HDD/DB lock/API p95 latency。
+7. 後台改成 job/queue 模型：API 快速回 `202 + job_id`，背景 worker 解析、寫 DB、跑防弊分析。
+8. 預留多用途定位平台欄位：`device_type=gpsring/truck/fleet/asset`、tenant/group、feature flags；工程車/車隊應用先預留，GPSRing 完善後再另案開發。
+9. 針對 8 小時續航做資料頻率策略：10s/30s/60s/300s 動態採樣與異常時高頻模式。
