@@ -125,6 +125,7 @@ window.onerror = function(message, source, lineno, colno, error) {
                             <option value="suspicious_ab">中繼舍停留</option>
                             <option value="cheat_hsr">高鐵極速作弊</option>
                             <option value="gps_fault">GPS 定位故障</option>
+                            <option value="poaching_mountain_net">山區攔鳥網/擄鴿</option>
                         </select>
                         <a id="template-link" href="#" download class="text-[10px] text-gray-400 hover:text-teal-300 underline">下載樣板</a>
                     </div>
@@ -144,6 +145,25 @@ window.onerror = function(message, source, lineno, colno, error) {
                         </div>
                         <div id="csv-upload-status" class="text-[10px] text-gray-400 italic"></div>
                     </form>
+                </div>
+            </div>
+
+            <!-- v0.3.0 規則 Help / 閥值設定 -->
+            <div id="rule-settings-panel" class="hidden bg-gray-700/30 p-4 rounded-lg border border-teal-900/50 space-y-3">
+                <div class="flex items-center justify-between border-b border-gray-600 pb-2">
+                    <h3 class="text-sm font-semibold text-teal-400"><i class="fa-solid fa-sliders mr-2"></i> 規則 Help / 閥值設定</h3>
+                    <button onclick="resetRuleProfile()" class="text-[10px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-gray-300">恢復預設</button>
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-[10px]">
+                    <label class="space-y-1"><span class="text-gray-400">連續路廊門檻 km</span><input id="rule-min-corridor-km" type="number" min="1" max="200" step="1" value="20" onchange="applyRuleProfile()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-teal-300 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">高速路廊距離 m</span><input id="rule-hwy-distance-m" type="number" min="50" max="5000" step="50" value="900" onchange="applyRuleProfile()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-teal-300 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">高鐵路廊距離 m</span><input id="rule-hsr-distance-m" type="number" min="50" max="5000" step="50" value="1200" onchange="applyRuleProfile()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-teal-300 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">貼地高度上限 m</span><input id="rule-ground-alt-m" type="number" min="0" max="1000" step="10" value="90" onchange="applyRuleProfile()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-teal-300 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">車輛速度下限 km/h</span><input id="rule-hwy-speed-kmh" type="number" min="1" max="250" step="1" value="72" onchange="applyRuleProfile()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-teal-300 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">高鐵速度下限 km/h</span><input id="rule-hsr-speed-kmh" type="number" min="1" max="400" step="1" value="150" onchange="applyRuleProfile()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-teal-300 font-mono"></label>
+                </div>
+                <div class="text-[10px] text-gray-400 leading-relaxed bg-slate-950/60 border border-slate-800 rounded p-2">
+                    <b class="text-teal-300">GPS-R03/R04：</b>短暫貼近高速/高鐵只列為 partial/review；必須連續達 <span id="rule-help-km" class="text-white font-mono">20</span>km 才升級高危。
                 </div>
             </div>
 
@@ -489,6 +509,53 @@ window.onerror = function(message, source, lineno, colno, error) {
         let customPoints = [];           // 自建點位數組
         let customMarkersGroup = L.layerGroup().addTo(map); // 自建點圖層組
         let customPolyline = null;       // 自建點折線
+        const defaultRuleProfile = {
+            min_corridor_match_km: 20,
+            highway_corridor_distance_m: 900,
+            hsr_corridor_distance_m: 1200,
+            ground_altitude_max_m: 90,
+            highway_speed_min_kmh: 72,
+            hsr_speed_min_kmh: 150
+        };
+        let currentRuleProfile = { ...defaultRuleProfile };
+
+        function readRuleProfileFromUI() {
+            const val = (id, fallback) => parseFloat(document.getElementById(id)?.value || fallback);
+            return {
+                min_corridor_match_km: val('rule-min-corridor-km', 20),
+                highway_corridor_distance_m: val('rule-hwy-distance-m', 900),
+                hsr_corridor_distance_m: val('rule-hsr-distance-m', 1200),
+                ground_altitude_max_m: val('rule-ground-alt-m', 90),
+                highway_speed_min_kmh: val('rule-hwy-speed-kmh', 72),
+                hsr_speed_min_kmh: val('rule-hsr-speed-kmh', 150)
+            };
+        }
+
+        function ruleProfileQuery() {
+            currentRuleProfile = readRuleProfileFromUI();
+            const qs = new URLSearchParams(currentRuleProfile);
+            return qs.toString();
+        }
+
+        function applyRuleProfile() {
+            currentRuleProfile = readRuleProfileFromUI();
+            const helpKm = document.getElementById('rule-help-km');
+            if (helpKm) helpKm.innerText = currentRuleProfile.min_corridor_match_km;
+            if (activePoints.length > 0) evaluateAndRenderSandbox(false);
+        }
+
+        function resetRuleProfile() {
+            const mapIds = {
+                'rule-min-corridor-km': defaultRuleProfile.min_corridor_match_km,
+                'rule-hwy-distance-m': defaultRuleProfile.highway_corridor_distance_m,
+                'rule-hsr-distance-m': defaultRuleProfile.hsr_corridor_distance_m,
+                'rule-ground-alt-m': defaultRuleProfile.ground_altitude_max_m,
+                'rule-hwy-speed-kmh': defaultRuleProfile.highway_speed_min_kmh,
+                'rule-hsr-speed-kmh': defaultRuleProfile.hsr_speed_min_kmh
+            };
+            Object.entries(mapIds).forEach(([id, value]) => { const el = document.getElementById(id); if (el) el.value = value; });
+            applyRuleProfile();
+        }
 
         // 載入特定鴿子軌跡數據
         async function loadTrack(deviceId, type) {
@@ -503,7 +570,7 @@ window.onerror = function(message, source, lineno, colno, error) {
             gpsMarkersGroup.clearLayers();
 
             try {
-                const res = await fetch(`${apiHost}/api/v1/tracks/${deviceId}/115D1X`);
+                const res = await fetch(`${apiHost}/api/v1/tracks/${deviceId}/115D1X?${ruleProfileQuery()}`);
                 const data = await res.json();
                 if (data.status === "success" && data.points && data.points.length > 0) {
                     console.log("Loaded live points from SQLite/PostgreSQL API:", data.points);
@@ -653,6 +720,7 @@ window.onerror = function(message, source, lineno, colno, error) {
             // 顯示沙盒與設備資訊
             document.getElementById('device-info-panel').classList.remove('hidden');
             document.getElementById('analysis-panel').classList.remove('hidden');
+            document.getElementById('rule-settings-panel').classList.remove('hidden');
             document.getElementById('sandbox-panel').classList.remove('hidden');
 
             document.getElementById('val-device').innerText = deviceId;
@@ -664,7 +732,8 @@ window.onerror = function(message, source, lineno, colno, error) {
                 "G0703-00002": "660002",
                 "G0703-CHEATER": "660002",
                 "G0703-AB_COTE": "660003",
-                "G0703-HSR": "660004"
+                "G0703-HSR": "660004",
+                "G0703-NET": "660005"
             };
             document.getElementById('val-ring').innerText = ringMap[deviceId] || "669999";
             document.getElementById('val-interval').innerText = "300s";
@@ -774,15 +843,14 @@ window.onerror = function(message, source, lineno, colno, error) {
             // 2. 重新跑物理防弊偵測 rules
             recalculateSpeeds(filteredPoints);
 
+            currentRuleProfile = readRuleProfileFromUI();
             let maxSpeed = 0;
             let stationaryCount = 0;
             let totalFraudPoints = 0;
             let totalSuspiciousPoints = 0;
             let alerts = [];
-
+            let corridorSegments = [];
             let gpsFaultPoints = 0;
-            let hsrPoints = 0;
-            let highwayPoints = 0;
             let stationaryRun = 0;
 
             filteredPoints.forEach((p, idx) => {
@@ -791,12 +859,7 @@ window.onerror = function(message, source, lineno, colno, error) {
                 let rules = [];
 
                 if (p.speed_kmh > maxSpeed) maxSpeed = p.speed_kmh;
-                if (p.speed_kmh < 2.0) {
-                    stationaryCount++;
-                    stationaryRun++;
-                } else {
-                    stationaryRun = 0;
-                }
+                if (p.speed_kmh < 2.0) { stationaryCount++; stationaryRun++; } else { stationaryRun = 0; }
 
                 const hdop = parseFloat(p.hdop || 0);
                 const sats = parseInt(p.satellites || 0);
@@ -807,13 +870,27 @@ window.onerror = function(message, source, lineno, colno, error) {
                 const hsrD = distanceToCorridorMeters(p.lat, p.lng, hsrCorridor);
                 const backendRules = (p.rule_code || p.note || "");
 
+                if (idx > 0) {
+                    const prevP = filteredPoints[idx - 1];
+                    const segDistM = getDistance(prevP.lat, prevP.lng, p.lat, p.lng);
+                    let ctype = "";
+                    let cdist = null;
+                    if (p.speed_kmh >= currentRuleProfile.highway_speed_min_kmh && p.speed_kmh < currentRuleProfile.hsr_speed_min_kmh && p.alt < currentRuleProfile.ground_altitude_max_m && hwyD < currentRuleProfile.highway_corridor_distance_m && hsrD >= currentRuleProfile.hsr_corridor_distance_m) {
+                        ctype = "highway"; cdist = hwyD;
+                    }
+                    if (p.speed_kmh >= currentRuleProfile.hsr_speed_min_kmh && p.alt < currentRuleProfile.ground_altitude_max_m && hsrD < currentRuleProfile.hsr_corridor_distance_m) {
+                        ctype = "hsr"; cdist = hsrD;
+                    }
+                    corridorSegments.push({ idx, startSeq: prevP.seq, endSeq: p.seq, distanceM: segDistM, type: ctype, corridorDistanceM: cdist });
+                }
+
                 if (hdop >= 3.5 || sats <= 5 || prevHdop >= 3.5 || prevSats <= 5 || backendRules.includes("GPS-R06")) {
                     status = "GPS_FAULT";
                     rules.push("GPS-R06");
                     reasons.push(`GPS 品質異常：HDOP ${hdop} / 衛星 ${sats}，應先排除定位漂移與相鄰跳點`);
                     gpsFaultPoints++;
                 } else {
-                    if (p.speed_kmh > 150 || backendRules.includes("GPS-R01")) {
+                    if (p.speed_kmh > currentRuleProfile.hsr_speed_min_kmh && hsrD >= currentRuleProfile.hsr_corridor_distance_m) {
                         status = "CRITICAL_FRAUD";
                         rules.push("GPS-R01");
                         reasons.push(`超物理速度 ${p.speed_kmh} km/h`);
@@ -823,77 +900,101 @@ window.onerror = function(message, source, lineno, colno, error) {
                         reasons.push(`速度偏高 ${p.speed_kmh} km/h`);
                     }
 
-                    if ((p.speed_kmh >= 72 && p.speed_kmh < 150 && p.alt < 90 && hwyD < 900 && hsrD >= 1200) || backendRules.includes("GPS-R03")) {
-                        status = "CRITICAL_FRAUD";
-                        rules.push("GPS-R02", "GPS-R03");
-                        reasons.push(`貼地高速且距國道/快速道路路廊約 ${hwyD.toFixed(0)}m`);
-                        highwayPoints++;
+                    if (p.speed_kmh >= currentRuleProfile.highway_speed_min_kmh && p.speed_kmh < currentRuleProfile.hsr_speed_min_kmh && p.alt < currentRuleProfile.ground_altitude_max_m && hwyD < currentRuleProfile.highway_corridor_distance_m && hsrD >= currentRuleProfile.hsr_corridor_distance_m) {
+                        status = "SUSPICIOUS";
+                        rules.push("GPS-R02", "GPS-R03-PARTIAL");
+                        reasons.push(`短段貼地高速且距國道/快速道路約 ${hwyD.toFixed(0)}m；需連續 ${currentRuleProfile.min_corridor_match_km}km 才高危`);
                     }
 
-                    if ((p.speed_kmh >= 150 && p.alt < 90 && hsrD < 1200) || backendRules.includes("GPS-R04")) {
-                        status = "CRITICAL_FRAUD";
-                        rules.push("GPS-R04");
-                        reasons.push(`高速段貼近高鐵路廊約 ${hsrD.toFixed(0)}m，疑似台北→苗栗高鐵移動`);
-                        hsrPoints++;
+                    if (p.speed_kmh >= currentRuleProfile.hsr_speed_min_kmh && p.alt < currentRuleProfile.ground_altitude_max_m && hsrD < currentRuleProfile.hsr_corridor_distance_m) {
+                        status = "SUSPICIOUS";
+                        rules.push("GPS-R04-PARTIAL");
+                        reasons.push(`短段貼近高鐵路廊約 ${hsrD.toFixed(0)}m；需連續 ${currentRuleProfile.min_corridor_match_km}km 才高危`);
                     }
 
                     if (stationaryRun >= 5 || backendRules.includes("GPS-R05")) {
                         if (status !== "CRITICAL_FRAUD") status = "SUSPICIOUS";
                         rules.push("GPS-R05");
-                        reasons.push("連續低速滯留，疑似接應/AB 舍停留");
-                        totalSuspiciousPoints++;
+                        reasons.push("連續低速滯留，疑似接應/AB 舍/攔鳥網停留");
+                    }
+                    if (backendRules.includes("GPS-R08") || backendRules.includes("GPS-R09") || backendRules.includes("GPS-R10")) {
+                        if (status !== "CRITICAL_FRAUD") status = "SUSPICIOUS";
+                        rules.push("GPS-R08", "GPS-R09", "GPS-R10");
+                        p.event_icon = "🕸️";
+                        reasons.push("疑似山區攔鳥網/擄鴿起點，需優先定位通知會長處理");
                     }
                 }
-
-                if (status === "CRITICAL_FRAUD") totalFraudPoints++;
-                else if (status === "SUSPICIOUS") totalSuspiciousPoints++;
 
                 p.status = status;
                 p.rule_code = [...new Set(rules)].join(",");
                 p.anomaly_reason = reasons.join("；");
             });
 
-            // 計算即時風險分數
+            const corridorRuns = [];
+            for (let i = 0; i < corridorSegments.length; ) {
+                const ctype = corridorSegments[i].type;
+                if (!ctype) { i++; continue; }
+                const start = i;
+                let distM = 0;
+                let sumCd = 0;
+                let cntCd = 0;
+                while (i < corridorSegments.length && corridorSegments[i].type === ctype) {
+                    distM += corridorSegments[i].distanceM;
+                    if (corridorSegments[i].corridorDistanceM !== null) { sumCd += corridorSegments[i].corridorDistanceM; cntCd++; }
+                    i++;
+                }
+                const end = i - 1;
+                const km = distM / 1000;
+                if (km >= currentRuleProfile.min_corridor_match_km) {
+                    corridorRuns.push({ type: ctype, startSeq: corridorSegments[start].startSeq, endSeq: corridorSegments[end].endSeq, distanceKm: km, avgCorridorDistanceM: sumCd / Math.max(1, cntCd) });
+                }
+            }
+
+            corridorRuns.forEach(run => {
+                filteredPoints.forEach(p => {
+                    if (p.seq > run.startSeq && p.seq <= run.endSeq) {
+                        p.status = "CRITICAL_FRAUD";
+                        const rule = run.type === "highway" ? "GPS-R03-CORRIDOR-RUN" : "GPS-R04-CORRIDOR-RUN";
+                        let rules = (p.rule_code || "").split(',').filter(Boolean).filter(r => !r.endsWith('-PARTIAL'));
+                        if (run.type === "highway" && !rules.includes("GPS-R02")) rules.push("GPS-R02");
+                        if (!rules.includes(rule)) rules.push(rule);
+                        p.rule_code = [...new Set(rules)].join(',');
+                        p.anomaly_reason = `連續 ${run.distanceKm.toFixed(1)}km 貼近${run.type === 'highway' ? '高速/快速道路' : '高鐵'}路廊，達到 ${currentRuleProfile.min_corridor_match_km}km 門檻`;
+                    }
+                });
+            });
+
+            totalFraudPoints = filteredPoints.filter(p => p.status === "CRITICAL_FRAUD").length;
+            totalSuspiciousPoints = filteredPoints.filter(p => p.status === "SUSPICIOUS").length;
+
             let riskScore = 0;
-            if (hsrPoints > 0) {
-                riskScore = Math.min(100, 90 + hsrPoints * 2);
-                alerts.push({
-                    type: "🔴 GPS-R04 高鐵路廊重合",
-                    level: "CRITICAL",
-                    message: `低頻 300s 仍偵測到 ${hsrPoints} 個高鐵路廊證據點；原始段符合台北/板橋→苗栗高鐵移動特徵，抽稀後最高視速度 ${maxSpeed.toFixed(1)} km/h。`
-                });
-            }
-            if (highwayPoints > 0) {
-                riskScore = Math.min(100, Math.max(riskScore, 85 + highwayPoints * 2));
-                alerts.push({
-                    type: "🔴 GPS-R02/R03 貼地高速與國道路廊",
-                    level: "CRITICAL",
-                    message: `偵測到 ${highwayPoints} 個點符合基隆接應後沿國道/快速道路南下至頭份的貼地高速特徵。`
-                });
-            }
-            if (totalFraudPoints > 0 && hsrPoints === 0 && highwayPoints === 0) {
-                riskScore = Math.min(100, 75 + totalFraudPoints * 2);
-                alerts.push({
-                    type: "🔴 GPS-R01 超物理速度",
-                    level: "CRITICAL",
-                    message: `偵測到 ${totalFraudPoints} 個點位速度超過賽鴿合理極限，最高 ${maxSpeed.toFixed(1)} km/h。`
-                });
-            }
-            if (totalSuspiciousPoints > 0) {
+            corridorRuns.filter(r => r.type === 'hsr').forEach(run => {
+                riskScore = Math.max(riskScore, 90);
+                alerts.push({ type: "🔴 GPS-R04-CORRIDOR-RUN 高鐵連續路廊", level: "CRITICAL", message: `連續 ${run.distanceKm.toFixed(1)}km 貼近高鐵路廊，平均距離 ${run.avgCorridorDistanceM.toFixed(0)}m，已達 ${currentRuleProfile.min_corridor_match_km}km 門檻。` });
+            });
+            corridorRuns.filter(r => r.type === 'highway').forEach(run => {
+                riskScore = Math.max(riskScore, 88);
+                alerts.push({ type: "🔴 GPS-R03-CORRIDOR-RUN 高速連續路廊", level: "CRITICAL", message: `連續 ${run.distanceKm.toFixed(1)}km 貼近高速/快速道路，平均距離 ${run.avgCorridorDistanceM.toFixed(0)}m，已達 ${currentRuleProfile.min_corridor_match_km}km 門檻。` });
+            });
+            if (corridorRuns.length === 0 && filteredPoints.some(p => (p.rule_code || '').includes('GPS-R03-PARTIAL') || (p.rule_code || '').includes('GPS-R04-PARTIAL'))) {
                 riskScore = Math.max(riskScore, 45);
-                alerts.push({
-                    type: "🟠 GPS-R05 中途滯留嫌疑",
-                    level: "WARNING",
-                    message: "軌跡存在連續低速停留，需比對是否為接應點、AB 舍或合法等待點。"
-                });
+                alerts.push({ type: "🟠 GPS-R03/R04-PARTIAL 路廊短段待複核", level: "WARNING", message: `有點位短暫貼近高速/高鐵，但未連續達 ${currentRuleProfile.min_corridor_match_km}km，先列人工複核，不直接判高危。` });
+            }
+            if (totalFraudPoints > 0 && corridorRuns.length === 0) {
+                riskScore = Math.min(100, Math.max(riskScore, 75 + totalFraudPoints * 2));
+                alerts.push({ type: "🔴 GPS-R01 超物理速度", level: "CRITICAL", message: `偵測到 ${totalFraudPoints} 個點位速度超過賽鴿合理極限，最高 ${maxSpeed.toFixed(1)} km/h。` });
+            }
+            if (filteredPoints.some(p => (p.rule_code || '').includes('GPS-R08') || (p.rule_code || '').includes('GPS-R09') || (p.rule_code || '').includes('GPS-R10'))) {
+                riskScore = Math.max(riskScore, 55);
+                alerts.push({ type: "🕸️ GPS-R08/R09/R10 疑似擄鴿/攔鳥網起點", level: "WARNING", message: "偵測到疑似攔鳥網/擄鴿起點：低速滯留後接續交通工具轉運，建議優先通知會長定位處理。" });
+            }
+            if (filteredPoints.some(p => (p.rule_code || '').includes('GPS-R05'))) {
+                riskScore = Math.max(riskScore, 45);
+                alerts.push({ type: "🟠 GPS-R05 中途滯留嫌疑", level: "WARNING", message: "軌跡存在連續低速停留，需比對是否為接應點、AB 舍或山區攔鳥網。" });
             }
             if (gpsFaultPoints > 0) {
                 riskScore = Math.max(riskScore, 25);
-                alerts.push({
-                    type: "🟣 GPS-R06 定位品質異常",
-                    level: "WARNING",
-                    message: `偵測到 ${gpsFaultPoints} 個點 HDOP/衛星數異常，應標為設備/定位疑慮，不直接當作弊。`
-                });
+                alerts.push({ type: "🟣 GPS-R06 定位品質異常", level: "WARNING", message: `偵測到 ${gpsFaultPoints} 個點 HDOP/衛星數異常，應標為設備/定位疑慮，不直接當作弊。` });
             }
 
             // 更新左側的風險徽章與儀表板
@@ -1011,7 +1112,13 @@ window.onerror = function(message, source, lineno, colno, error) {
                     opacity: 0.85
                 });
                 
-                pl.bindTooltip(`行為狀態: ${seg.status}`, { sticky: true });
+                const segmentStatusLabel = {
+                    "PASS": "🟢 正常飛行",
+                    "SUSPICIOUS": "🟠 疑似異常：滯留 / 短段路廊待複核",
+                    "CRITICAL_FRAUD": "🔴 高危作弊：連續路廊 / 交通工具嫌疑",
+                    "GPS_FAULT": "🟣 GPS 定位品質疑慮"
+                }[seg.status] || seg.status;
+                pl.bindTooltip(`軌跡狀態：${segmentStatusLabel}`, { sticky: true });
                 leafletLayers.push(pl);
             });
 
@@ -1025,11 +1132,12 @@ window.onerror = function(message, source, lineno, colno, error) {
                 else if (p.status === "GPS_FAULT") color = "#a855f7";
 
                 // 使用自訂 SVG 圓點 DivIcon，並保持與地圖完美對齊
+                const iconHtml = p.event_icon || ((p.rule_code || '').includes('GPS-R08') ? '🕸️' : '');
                 const icon = L.divIcon({
                     className: 'custom-pigeon-marker',
-                    html: `<div class="w-3.5 h-3.5 rounded-full border-2 border-white shadow-md cursor-pointer transition-transform duration-100 hover:scale-125" style="background-color: ${color}"></div>`,
-                    iconSize: [14, 14],
-                    iconAnchor: [7, 7]
+                    html: iconHtml ? `<div class="w-7 h-7 flex items-center justify-center rounded-full border-2 border-white shadow-lg bg-rose-900 text-lg cursor-pointer animate-pulse">${iconHtml}</div>` : `<div class="w-3.5 h-3.5 rounded-full border-2 border-white shadow-md cursor-pointer transition-transform duration-100 hover:scale-125" style="background-color: ${color}"></div>`,
+                    iconSize: iconHtml ? [28, 28] : [14, 14],
+                    iconAnchor: iconHtml ? [14, 14] : [7, 7]
                 });
 
                 const marker = L.marker([p.lat, p.lng], {
@@ -1179,9 +1287,9 @@ async function uploadCSV(event) {
             GPS鴿環 GIS 系統 &copy; 2026. 苗栗頭份大鴻鴿會 專用防弊系統.
         </div>
         <div class="mt-1 flex justify-center items-center space-x-2 text-teal-400">
-            <span>版本：<span class="font-mono">v0.2.1</span></span>
+            <span>版本：<span class="font-mono">v0.3.0</span></span>
             <span class="text-gray-600">|</span>
-            <span>版名：<span class="font-bold">「真實防弊沙盤 - 上傳抽稀修正版」(Realistic Anti-Fraud Sandbox)</span></span>
+            <span>版名：<span class="font-bold">「連續路廊與擄鴿起點防弊版」(Corridor Run & Poaching Hotspot)</span></span>
         </div>
     </footer>
 </body>

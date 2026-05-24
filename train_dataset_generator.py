@@ -15,6 +15,7 @@ COTE_LNG = 120.902300
 KEELUNG_PICKUP = (25.1256, 121.7415, "基隆/大武崙接應點")
 TOUFEN_RELEASE = (24.6930, 120.9080, "頭份交流道附近釋放")
 AB_COTE = (24.8100, 121.0500, "新竹/竹北疑似 AB 中繼點")
+MOUNTAIN_NET = (24.8615, 121.2310, "桃竹丘陵疑似攔鳥網點")
 
 # 高速/快速道路路廊：基隆接應 → 國一/國三南下 → 頭份交流道
 HIGHWAY_CORRIDOR = [
@@ -219,9 +220,37 @@ def generate_gps_fault(base_time: int):
     return points
 
 
+def generate_poaching_mountain_net(base_time: int):
+    """山區擄鴿/攔鳥網劇本：正常飛行 → 山區低速滯留 → 轉運上路廊 → 釋放。"""
+    random.seed(70306)
+    points, seq, ts = [], 1, base_time
+    seq, ts = interpolate_leg(points, seq, ts, (START_LAT, START_LNG, "放飛"), MOUNTAIN_NET,
+                              (46, 78), (140, 320), 60, 230, 1.7, note="NORMAL_TO_MOUNTAIN_NET_AREA")
+    for _ in range(25):
+        seq = add_point(points, seq, ts,
+                        MOUNTAIN_NET[0] + random.uniform(-0.00009, 0.00009),
+                        MOUNTAIN_NET[1] + random.uniform(-0.00009, 0.00009),
+                        62 + random.uniform(-4, 4), random.uniform(0, 1.1), 1.0, 11, 3940, -58,
+                        "GPS-R08_R09_MOUNTAIN_NET_STATIONARY")
+        ts += 60
+    highway_join = (24.9650, 121.2180, "中壢路廊接上轉運")
+    seq, ts = interpolate_leg(points, seq, ts, MOUNTAIN_NET, highway_join,
+                              (45, 68), (45, 85), 60, 60, 0.8, hdop=0.9, sats=12, rssi=-61,
+                              note="GPS-R10_TRANSFER_TO_CORRIDOR")
+    join_idx = next(i for i, wp in enumerate(HIGHWAY_CORRIDOR) if wp[2] == "中壢路廊")
+    for i in range(join_idx, len(HIGHWAY_CORRIDOR) - 1):
+        seq, ts = interpolate_leg(points, seq, ts, HIGHWAY_CORRIDOR[i], HIGHWAY_CORRIDOR[i + 1],
+                                  (80, 108), (35, 72), 60, 18, 0.3,
+                                  hdop=0.8, sats=14, rssi=-63, note="GPS-R02_R03_AFTER_POACHING_TRANSFER")
+    seq, ts = interpolate_leg(points, seq, ts, TOUFEN_RELEASE, (COTE_LAT, COTE_LNG, "大鴻鴿會"),
+                              (38, 62), (60, 160), 60, 90, 2.1, note="RELEASE_AFTER_POACHING_TRANSFER")
+    seq = add_point(points, seq, ts, COTE_LAT, COTE_LNG, 28, 0.0, 0.8, 13, 3790, -69, "ARRIVED_COTE")
+    return points
+
+
 def generate_csv_track(mode="normal"):
     base_time = int(time.time()) - 8 * 3600
-    aliases = {"cheat": "cheat_highway", "highway": "cheat_highway", "hsr": "cheat_hsr", "ab": "suspicious_ab"}
+    aliases = {"cheat": "cheat_highway", "highway": "cheat_highway", "hsr": "cheat_hsr", "ab": "suspicious_ab", "poaching": "poaching_mountain_net"}
     mode = aliases.get(mode, mode)
     if mode == "normal":
         return generate_normal(base_time)
@@ -233,6 +262,8 @@ def generate_csv_track(mode="normal"):
         return generate_hsr(base_time)
     if mode == "gps_fault":
         return generate_gps_fault(base_time)
+    if mode == "poaching_mountain_net":
+        return generate_poaching_mountain_net(base_time)
     return generate_normal(base_time)
 
 
@@ -255,6 +286,7 @@ if __name__ == "__main__":
         ("suspicious_ab", "templates/template_suspicious.csv", "G0703-AB_COTE"),
         ("cheat_hsr", "templates/template_hsr.csv", "G0703-HSR"),
         ("gps_fault", "templates/template_gps_fault.csv", "G0703-FAULT"),
+        ("poaching_mountain_net", "templates/template_poaching_mountain_net.csv", "G0703-NET"),
     ]
     for mode, filename, ring_id in specs:
         save_to_csv(filename, generate_csv_track(mode), ring_id)

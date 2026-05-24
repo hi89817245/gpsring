@@ -3,7 +3,7 @@ import json
 import logging
 import sqlite3
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Query
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -471,10 +471,27 @@ def ingest_gps_tracks(payload: IngestPayload):
         conn.close()
 
 @app.get("/api/v1/tracks/{device_id}/{race_id}")
-def get_device_race_tracks(device_id: str, race_id: str):
+def get_device_race_tracks(
+    device_id: str,
+    race_id: str,
+    min_corridor_match_km: float = Query(20, ge=1, le=200),
+    highway_corridor_distance_m: float = Query(900, ge=50, le=5000),
+    hsr_corridor_distance_m: float = Query(1200, ge=50, le=5000),
+    ground_altitude_max_m: float = Query(90, ge=0, le=1000),
+    highway_speed_min_kmh: float = Query(72, ge=1, le=250),
+    hsr_speed_min_kmh: float = Query(150, ge=1, le=400),
+):
     conn_tuple = get_db_conn()
     from fraud_engine import PigeonFraudEngine
-    engine = PigeonFraudEngine()
+    rule_profile = {
+        "min_corridor_match_km": min_corridor_match_km,
+        "highway_corridor_distance_m": highway_corridor_distance_m,
+        "hsr_corridor_distance_m": hsr_corridor_distance_m,
+        "ground_altitude_max_m": ground_altitude_max_m,
+        "highway_speed_min_kmh": highway_speed_min_kmh,
+        "hsr_speed_min_kmh": hsr_speed_min_kmh,
+    }
+    engine = PigeonFraudEngine(rule_profile=rule_profile)
     
     conn, engine_type = conn_tuple
     pts = []
@@ -486,6 +503,7 @@ def get_device_race_tracks(device_id: str, race_id: str):
         "G0703-AB_COTE": "suspicious_ab",
         "G0703-HSR": "cheat_hsr",
         "G0703-FAULT": "gps_fault",
+        "G0703-NET": "poaching_mountain_net",
     }
     force_demo_template = device_id in demo_mode_map
 
@@ -507,6 +525,7 @@ def get_device_race_tracks(device_id: str, race_id: str):
                 "satellites": p["satellites"],
                 "battery_mv": p["battery_mv"],
                 "rssi": p["rssi"],
+                "note": p.get("note", ""),
                 "device": device_id,
                 "race": race_id
             })

@@ -1,12 +1,88 @@
 # ESP32-C3 / C6 極簡 NVS Flash 儲存與離線軌跡快取韌體 (FIRMWARE.md)
-Version: 1.0.0
-Last Updated: 2026-05-23
+Version: 1.1.0
+Last Updated: 2026-05-24
 
-以下是專門為**極低成本、長續航（180秒間隔，70mAh 電池可運行 40+ 小時）**設計的 Arduino C++ 韌體架構。
+以下是專門為**極低成本、長續航（預設 300 秒間隔，目標至少 8 小時；可依賽距調整為 10/60/180/300 秒）**設計的 Arduino C++ / ESP-IDF 韌體架構。
 
-本韌體有兩個核心省電邏輯：
-1.  **Deep Sleep 保持**：每次喚醒僅工作 10 秒（熱啟動 GPS 定位），讀取到 GPS 坐標後，將點寫入 ESP32 的內部 NVS Flash 快取中。隨即關閉 GPS VCC 進入 Deep Sleep 睡眠。
-2.  **降落後讀出**：平時在海上與飛行中**完全關閉 4G/Wi-Fi 等射頻發射**（極度省電）。直到信鴿歸巢插入 USB 充電座，或偵測到特定 Wi-Fi SSID 後，才將快取的 NVS 點大批次 (Batch) 讀出上傳。
+本韌體有三個核心省電邏輯：
+1. **狀態機省電**：開機後依序進入 `init`、`caring`、`start` 三種狀態，每個狀態的 GPS 採樣、Wi-Fi/4G 發射、Deep Sleep 週期不同。
+2. **Deep Sleep 保持**：每次喚醒僅工作數秒到十數秒，讀取 GPS 坐標後寫入 ESP32 內部 NVS / LittleFS / FATFS 快取，隨即關閉 GPS VCC 並進入 Deep Sleep。
+3. **歸返後讀出 / 例外即時通報**：平時在海上與飛行中盡量關閉 4G/Wi-Fi 等射頻發射。歸巢插入 USB 充電座、偵測到指定 Wi-Fi、或 4G 版本遇到「擄鴿/異常滯留」事件時，才批次上傳或即時告警。
+
+---
+
+## 0. 韌體狀態機：init / caring / start
+
+這是未來可共用的自檢方式，不論外包商韌體或我方韌體都應輸出相同狀態，方便後台快速判斷每個 GPS 鴿環是否符合公司標準。
+
+| 狀態 | 觸發時機 | 主要行為 | 無線需求 | 後台用途 |
+|---|---|---|---|---|
+| `init` | 開機、配對、裝籠前 | 使用預設 `init.csv` 或 API 匯入 3 個基準座標；檢查 GPS、Flash、電池、防拆、韌體版本 | 需要 Wi-Fi / USB / BLE 其一 | 確認硬體/韌體初始化正常 |
+| `caring` | 配對完成到放飛前 | 每小時醒來一次，連續記錄 N 筆定位與電池狀態後深睡 | 可離線；有 Wi-Fi 時可回報心跳 | 確認裝籠期間沒有異常位移或失聯 |
+| `start` | 放飛時間到歸返 | 每 n 秒正式記錄 GPS；預設 300 秒，可依賽距改 10/60/180 秒；4G 版可在異常滯留時即時通報 | 離線優先；4G 版事件式上報 | 產生正式比賽軌跡與防弊證據 |
+
+### init 狀態：三個預設基準點
+
+開機時必須能拿到至少 3 個基準座標，來源可為：
+1. 韌體內建預設 `init.csv`。
+2. USB/ESPConnect API 寫入。
+3. 後台配對流程下發。
+
+建議欄位：
+
+```csv
+point_type,name,lat,lng,alt_m
+release,放鴿點,25.835123,121.950000,0
+home_cote,0703大鴻鴿會,24.685300,120.902300,80
+check_anchor,北部基準檢查點,25.047800,121.517000,20
+```
+
+韌體需輸出：`state=init + firmware_version + device_id + gps_fixed + battery_mv + storage_free + init_points_hash`。
+
+### caring 狀態：裝籠/待放飛保活
+
+- 預設每 60 分鐘醒來一次。
+- 每次醒來可連續取 3～5 筆 GPS，取中位數避免漂移。
+- 若尚未放飛卻出現大位移、低電壓、防拆斷線，狀態上報 `caring_alert`。
+- 完成後深睡，避免放飛前耗電。
+
+### start 狀態：正式比賽軌跡
+
+- 放飛時間到達後，進入正式紀錄。
+- 每 n 秒寫一筆：`timestamp,lat,lng,alt,speed,hdop,satellites,battery_mv,rssi,state`。
+- 離線版：歸返後 USB / Wi-Fi / BLE 批次上傳。
+- 4G 版：一般仍可低頻離線，但若偵測到疑似擄鴿/異常滯留，可即時上報會長。
+
+---
+
+## 0.1 韌體上傳方式：.ino / .bin / ESPConnect
+
+### `.ino` 與 `.bin` 差異
+
+- `.ino`：Arduino 原始碼，給工程師修改、編譯、追版本。
+- `.bin`：已編譯韌體，給量產、客服、鴿會現場更新用。
+- `.ico`：網站 icon（圖示資產），**不是** ESP32 韌體檔，不能拿來燒錄。
+
+### 建議流程
+
+1. 工程師用 Arduino IDE / PlatformIO / ESP-IDF 編譯 `.ino` 或 C++ 專案。
+2. 產生 `gpsring-vX.Y.Z-esp32c3.bin`。
+3. 首次燒錄可用 USB：
+
+```bash
+esptool.py --chip esp32c3 --port /dev/ttyUSB0 --baud 921600 write_flash 0x0 gpsring-v0.3.0-esp32c3.bin
+```
+
+Windows 例：
+
+```powershell
+esptool.py --chip esp32c3 --port COM5 --baud 921600 write_flash 0x0 gpsring-v0.3.0-esp32c3.bin
+```
+
+4. 已安裝 ESPConnect/OTA 後，可透過瀏覽器連到裝置 AP 或管理頁，上傳 `.bin` 進行 OTA 更新。
+5. OTA 成功後，裝置需在 serial console（序列監控）或 API 回報：`firmware_version`、`build_hash`、`state=init`。
+
+> 外包要求：代工商必須交付 `.ino`/C++ source、PlatformIO 或 ESP-IDF build 設定、量產 `.bin`、分割表、燒錄位址、NVS 初始化格式，以及 OTA/ESPConnect 範例。只交 `.bin` 不足以驗收。
 
 ---
 
