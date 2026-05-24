@@ -186,6 +186,29 @@ window.onerror = function(message, source, lineno, colno, error) {
                 </div>
             </div>
 
+            <!-- v0.3.1 高度/時間小窗與異常篩選器 -->
+            <div id="anomaly-filter-panel" class="hidden bg-gray-700/30 p-4 rounded-lg border border-cyan-900/50 space-y-3">
+                <div class="flex items-center justify-between border-b border-gray-600 pb-2">
+                    <h3 class="text-sm font-semibold text-cyan-300"><i class="fa-solid fa-filter mr-2"></i> 高度/時間小窗與異常篩選器</h3>
+                    <button onclick="clearAnomalyFilters()" class="text-[10px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-gray-300">清除</button>
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-[10px]">
+                    <label class="space-y-1"><span class="text-gray-400">起始時間</span><input id="filter-start-time" type="datetime-local" onchange="applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">結束時間</span><input id="filter-end-time" type="datetime-local" onchange="applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">最低高度 m</span><input id="filter-min-alt" type="number" step="10" placeholder="不限" onchange="applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">最高高度 m</span><input id="filter-max-alt" type="number" step="10" placeholder="不限" onchange="applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">最低速度 km/h</span><input id="filter-min-speed" type="number" step="1" placeholder="不限" onchange="applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
+                    <label class="space-y-1"><span class="text-gray-400">風險等級</span><select id="filter-status" onchange="applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200"><option value="ALL">全部</option><option value="ANOMALY">只看異常</option><option value="CRITICAL_FRAUD">🔴 高危</option><option value="SUSPICIOUS">🟠 複核</option><option value="GPS_FAULT">🟣 GPS 疑慮</option><option value="PASS">🟢 正常</option></select></label>
+                    <label class="space-y-1 col-span-2"><span class="text-gray-400">規則碼/關鍵字</span><input id="filter-rule" type="text" placeholder="例：GPS-R03 / GPS-R08 / 高鐵" oninput="applyAnomalyFilters()" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-cyan-200 font-mono"></label>
+                </div>
+                <div id="time-alt-summary" class="text-[10px] text-gray-400 bg-slate-950/50 border border-slate-800 rounded p-2">尚未載入軌跡。</div>
+                <div class="space-y-1">
+                    <div class="flex justify-between text-[10px] text-gray-400"><span>高度/時間小窗 (點擊小格可定位)</span><span id="filter-count-badge" class="text-cyan-300 font-mono">0/0</span></div>
+                    <div id="time-alt-window" class="h-20 overflow-x-auto overflow-y-hidden bg-slate-950/70 rounded border border-slate-800 flex items-end gap-[2px] px-2 py-2"></div>
+                </div>
+                <div id="filtered-anomaly-list" class="max-h-40 overflow-y-auto space-y-1 text-[10px]"></div>
+            </div>
+
             <!-- 設備參數 -->
             <div id="device-info-panel" class="hidden bg-gray-700/30 p-4 rounded-lg border border-gray-700 space-y-3">
                 <h3 class="text-sm font-semibold text-gray-300 border-b border-gray-600 pb-2"><i class="fa-solid fa-microchip mr-2"></i> 當前設備與賽事設定</h3>
@@ -518,6 +541,143 @@ window.onerror = function(message, source, lineno, colno, error) {
             hsr_speed_min_kmh: 150
         };
         let currentRuleProfile = { ...defaultRuleProfile };
+        let lastEvaluatedPoints = [];
+        let trackMarkerIndex = {};
+        let selectedTrackSeq = null;
+
+        function toTaipeiLocalInputValue(ts) {
+            if (!ts) return "";
+            const d = new Date(ts * 1000 + (8 * 60 * 60 * 1000));
+            return d.toISOString().slice(0, 16);
+        }
+
+        function localInputToUnixSeconds(value) {
+            if (!value) return null;
+            const ms = new Date(value).getTime();
+            return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+        }
+
+        function getCurrentFilters() {
+            const numOrNull = (id) => {
+                const v = document.getElementById(id)?.value;
+                if (v === undefined || v === null || v === "") return null;
+                const n = parseFloat(v);
+                return Number.isFinite(n) ? n : null;
+            };
+            return {
+                startTs: localInputToUnixSeconds(document.getElementById('filter-start-time')?.value),
+                endTs: localInputToUnixSeconds(document.getElementById('filter-end-time')?.value),
+                minAlt: numOrNull('filter-min-alt'),
+                maxAlt: numOrNull('filter-max-alt'),
+                minSpeed: numOrNull('filter-min-speed'),
+                status: document.getElementById('filter-status')?.value || 'ALL',
+                keyword: (document.getElementById('filter-rule')?.value || '').trim().toUpperCase()
+            };
+        }
+
+        function pointMatchesFilters(p, filters) {
+            const ts = parseInt(p.timestamp || 0);
+            const alt = parseFloat(p.alt || 0);
+            const speed = parseFloat(p.speed_kmh || 0);
+            const status = p.status || 'PASS';
+            if (filters.startTs !== null && ts < filters.startTs) return false;
+            if (filters.endTs !== null && ts > filters.endTs) return false;
+            if (filters.minAlt !== null && alt < filters.minAlt) return false;
+            if (filters.maxAlt !== null && alt > filters.maxAlt) return false;
+            if (filters.minSpeed !== null && speed < filters.minSpeed) return false;
+            if (filters.status === 'ANOMALY' && status === 'PASS') return false;
+            if (!['ALL', 'ANOMALY'].includes(filters.status) && status !== filters.status) return false;
+            if (filters.keyword) {
+                const haystack = `${p.rule_code || ''} ${p.anomaly_reason || ''} ${status}`.toUpperCase();
+                if (!haystack.includes(filters.keyword)) return false;
+            }
+            return true;
+        }
+
+        function applyPointFilters(points) {
+            const filters = getCurrentFilters();
+            return points.filter(p => pointMatchesFilters(p, filters));
+        }
+
+        function clearAnomalyFilters() {
+            ['filter-start-time', 'filter-end-time', 'filter-min-alt', 'filter-max-alt', 'filter-min-speed', 'filter-rule'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            const status = document.getElementById('filter-status');
+            if (status) status.value = 'ALL';
+            applyAnomalyFilters();
+        }
+
+        function applyAnomalyFilters() {
+            if (lastEvaluatedPoints.length > 0) evaluateAndRenderSandbox(false);
+            else renderTimeAltWindow([], []);
+        }
+
+        function statusChip(status) {
+            if (status === 'CRITICAL_FRAUD') return '🔴 高危';
+            if (status === 'SUSPICIOUS') return '🟠 複核';
+            if (status === 'GPS_FAULT') return '🟣 GPS疑慮';
+            return '🟢 正常';
+        }
+
+        function renderTimeAltWindow(allPoints, displayPoints) {
+            const win = document.getElementById('time-alt-window');
+            const summary = document.getElementById('time-alt-summary');
+            const list = document.getElementById('filtered-anomaly-list');
+            const badge = document.getElementById('filter-count-badge');
+            if (!win || !summary || !list || !badge) return;
+            const shownSeqs = new Set(displayPoints.map(p => String(p.seq)));
+            badge.innerText = `${displayPoints.length}/${allPoints.length}`;
+            if (!allPoints.length) {
+                summary.innerText = '尚未載入軌跡。';
+                win.innerHTML = '';
+                list.innerHTML = '';
+                return;
+            }
+            const tsValues = allPoints.map(p => parseInt(p.timestamp || 0)).filter(Boolean);
+            const altValues = allPoints.map(p => parseFloat(p.alt || 0));
+            const minTs = Math.min(...tsValues), maxTs = Math.max(...tsValues);
+            const minAlt = Math.min(...altValues), maxAlt = Math.max(...altValues);
+            const startText = new Date(minTs * 1000).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+            const endText = new Date(maxTs * 1000).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+            const anomalies = allPoints.filter(p => (p.status || 'PASS') !== 'PASS').length;
+            summary.innerHTML = `時間窗：<b class="text-cyan-200">${startText}</b> → <b class="text-cyan-200">${endText}</b>；高度 ${minAlt.toFixed(0)}–${maxAlt.toFixed(0)}m；異常 ${anomalies} 點。`;
+            const denom = Math.max(1, maxAlt - minAlt);
+            win.innerHTML = allPoints.map(p => {
+                const visible = shownSeqs.has(String(p.seq));
+                const h = 12 + Math.round(((parseFloat(p.alt || 0) - minAlt) / denom) * 56);
+                const color = p.status === 'CRITICAL_FRAUD' ? '#ef4444' : (p.status === 'SUSPICIOUS' ? '#f97316' : (p.status === 'GPS_FAULT' ? '#a855f7' : '#06b6d4'));
+                const selected = String(p.seq) === String(selectedTrackSeq);
+                return `<button title="點 #${p.seq}｜${p.alt}m｜${p.speed_kmh}km/h｜${statusChip(p.status)}" onclick="focusTrackPoint(${p.seq})" class="shrink-0 w-2 rounded-t transition-all ${visible ? '' : 'opacity-20 grayscale'} ${selected ? 'ring-2 ring-white' : ''}" style="height:${h}px;background:${color}"></button>`;
+            }).join('');
+            const interesting = displayPoints.filter(p => (p.status || 'PASS') !== 'PASS').slice(0, 30);
+            if (!interesting.length) {
+                list.innerHTML = '<div class="text-gray-500 border border-slate-800 rounded p-2 bg-slate-950/40">目前篩選條件下沒有異常點。</div>';
+            } else {
+                list.innerHTML = interesting.map(p => {
+                    const t = new Date(p.timestamp * 1000).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
+                    return `<button onclick="focusTrackPoint(${p.seq})" class="w-full text-left bg-slate-950/50 hover:bg-slate-800 border border-slate-800 rounded p-2">
+                        <div class="flex justify-between"><b class="text-cyan-200">#${p.seq} ${statusChip(p.status)}</b><span class="font-mono text-gray-500">${t}</span></div>
+                        <div class="text-gray-400">${p.alt}m｜${p.speed_kmh}km/h｜${p.rule_code || '-'}</div>
+                        <div class="text-gray-500 truncate">${p.anomaly_reason || '需人工複核'}</div>
+                    </button>`;
+                }).join('');
+            }
+        }
+
+        function focusTrackPoint(seq) {
+            selectedTrackSeq = seq;
+            const marker = trackMarkerIndex[String(seq)];
+            const point = lastEvaluatedPoints.find(p => String(p.seq) === String(seq));
+            if (marker) {
+                map.setView(marker.getLatLng(), Math.max(map.getZoom(), 13), { animate: true });
+                marker.openPopup();
+            } else if (point) {
+                map.setView([point.lat, point.lng], Math.max(map.getZoom(), 13), { animate: true });
+            }
+            renderTimeAltWindow(lastEvaluatedPoints, applyPointFilters(lastEvaluatedPoints));
+        }
 
         function readRuleProfileFromUI() {
             const val = (id, fallback) => parseFloat(document.getElementById(id)?.value || fallback);
@@ -722,6 +882,7 @@ window.onerror = function(message, source, lineno, colno, error) {
             document.getElementById('analysis-panel').classList.remove('hidden');
             document.getElementById('rule-settings-panel').classList.remove('hidden');
             document.getElementById('sandbox-panel').classList.remove('hidden');
+            document.getElementById('anomaly-filter-panel')?.classList.remove('hidden');
 
             document.getElementById('val-device').innerText = deviceId;
             document.getElementById('val-race').innerText = "115D1X";
@@ -964,6 +1125,10 @@ window.onerror = function(message, source, lineno, colno, error) {
                 });
             });
 
+            lastEvaluatedPoints = filteredPoints;
+            const displayPoints = applyPointFilters(filteredPoints);
+            renderTimeAltWindow(filteredPoints, displayPoints);
+
             totalFraudPoints = filteredPoints.filter(p => p.status === "CRITICAL_FRAUD").length;
             totalSuspiciousPoints = filteredPoints.filter(p => p.status === "SUSPICIOUS").length;
 
@@ -1058,7 +1223,7 @@ window.onerror = function(message, source, lineno, colno, error) {
             let currentSegment = [];
             let currentStatus = null;
 
-            filteredPoints.forEach((p, idx) => {
+            displayPoints.forEach((p, idx) => {
                 const latlng = [p.lat, p.lng];
                 const pStatus = p.status || "PASS";
 
@@ -1125,7 +1290,8 @@ window.onerror = function(message, source, lineno, colno, error) {
             pathLine = L.layerGroup(leafletLayers).addTo(map);
 
             // 4. 繪製精緻的、支持拖拽的 Marker 定位點！
-            filteredPoints.forEach(p => {
+            trackMarkerIndex = {};
+            displayPoints.forEach(p => {
                 let color = "#06b6d4";
                 if (p.status === "CRITICAL_FRAUD") color = "#ef4444";
                 else if (p.status === "SUSPICIOUS") color = "#f97316";
@@ -1199,11 +1365,12 @@ window.onerror = function(message, source, lineno, colno, error) {
                 marker.bindPopup(popupHtml);
                 marker.bindTooltip(`ID:${document.getElementById('val-device')?.innerText || '-'}｜點 #${p.seq}｜${timeStr}｜${p.speed_kmh} km/h｜${p.alt}m｜${statusLabel}${p.rule_code ? '｜' + p.rule_code : ''}`, { direction: "top", sticky: true });
                 gpsMarkersGroup.addLayer(marker);
+                trackMarkerIndex[String(p.seq)] = marker;
             });
 
             // 5. 自動自適應縮放
-            if (fitBounds && filteredPoints.length > 0) {
-                const bounds = L.latLngBounds(filteredPoints.map(p => [p.lat, p.lng]));
+            if (fitBounds && displayPoints.length > 0) {
+                const bounds = L.latLngBounds(displayPoints.map(p => [p.lat, p.lng]));
                 map.fitBounds(bounds, { padding: [50, 50] });
             }
         }
@@ -1287,9 +1454,9 @@ async function uploadCSV(event) {
             GPS鴿環 GIS 系統 &copy; 2026. 苗栗頭份大鴻鴿會 專用防弊系統.
         </div>
         <div class="mt-1 flex justify-center items-center space-x-2 text-teal-400">
-            <span>版本：<span class="font-mono">v0.3.0</span></span>
+            <span>版本：<span class="font-mono">v0.3.1</span></span>
             <span class="text-gray-600">|</span>
-            <span>版名：<span class="font-bold">「連續路廊與擄鴿起點防弊版」(Corridor Run & Poaching Hotspot)</span></span>
+            <span>版名：<span class="font-bold">「高度時間窗與異常篩選版」(Altitude-Time Window & Anomaly Filters)</span></span>
         </div>
     </footer>
 </body>
