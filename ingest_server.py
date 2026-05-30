@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import sqlite3
+import time
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Query
 from fastapi.responses import HTMLResponse, Response, FileResponse
@@ -19,6 +20,10 @@ FIRMWARE_DIR = os.getenv("GPSRING_FIRMWARE_DIR", "/share/esp32")
 
 # 初始化 FastAPI app
 app = FastAPI(title="GPS Pigeon Ring Ingestion API", version="1.1.0")
+
+# ── 裝置 Heartbeat 記憶體快取（輕量即時監控，不寫 DB）────────────────
+# { device_id: { "state": str, "ip": str, "fw": str, "mac": str, "ts": float, "gps_seen": bool, "gps_fixed": bool } }
+_device_heartbeats: dict = {}
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -379,6 +384,59 @@ async def upload_csv_tracks(
         raise HTTPException(status_code=500, detail=f"CSV processing failed: {str(e)}")
 
 # --- 路由實作 ---
+
+# ── 裝置即時狀態監控 ───────────────────────────────────────────
+class HeartbeatPayload(BaseModel):
+    device_id: str
+    state: str = "init"
+    firmware_version: str = ""
+    build_hash: str = ""
+    mac: str = ""
+    ip: str = ""
+    gps_seen: bool = False
+    gps_fixed: bool = False
+    boot_count: int = 0
+    free_heap: int = 0
+    battery_raw: int = 0
+
+@app.post("/api/v1/devices/heartbeat")
+def receive_heartbeat(payload: HeartbeatPayload):
+    """MCU 定期上報心跳（每 10s）— 存入記憶體快取"""
+    _device_heartbeats[payload.device_id] = {
+        "state": payload.state,
+        "firmware_version": payload.firmware_version,
+        "build_hash": payload.build_hash,
+        "mac": payload.mac,
+        "ip": payload.ip,
+        "gps_seen": payload.gps_seen,
+        "gps_fixed": payload.gps_fixed,
+        "boot_count": payload.boot_count,
+        "free_heap": payload.free_heap,
+        "battery_raw": payload.battery_raw,
+        "last_seen": time.time(),
+    }
+    logger.info(f"[HEARTBEAT] {payload.device_id} state={payload.state} ip={payload.ip}")
+    return {"status": "ok", "device_id": payload.device_id}
+
+@app.get("/api/v1/devices/status")
+def get_devices_status():
+    """即時顯示所有裝置心跳狀態，包含在線/離線判斷（>60s 無心跳 = 離線）"""
+    now = time.time()
+    result = []
+    for dev_id, info in _device_heartbeats.items():
+        age_sec = int(now - info["last_seen"])
+        online = age_sec < 60
+        result.append({
+            "device_id": dev_id,
+            "online": online,
+            "age_sec": age_sec,
+            **info,
+            "last_seen_iso": datetime.fromtimestamp(info["last_seen"]).strftime("%Y-%m-%d %H:%M:%S"),
+        })
+    # 依 state 排序：racing > caring > gps_fixed > gps_searching > init > offline
+    _state_order = {"racing": 0, "caring": 1, "gps_fixed": 2, "gps_searching": 3, "init": 4}
+    result.sort(key=lambda x: (_state_order.get(x["state"], 9) if x["online"] else 10, x["device_id"]))
+    return {"total": len(result), "online": sum(1 for x in result if x["online"]), "devices": result}
 
 @app.post("/api/v1/devices/config")
 def set_device_config(payload: ConfigPayload):
