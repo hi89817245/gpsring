@@ -139,3 +139,12 @@ A：不影響。reboot 自動啟動走的是系統 crontab：`@reboot ... start8
 
 ### Q40：`ntfy.xdove.win/hermes218` 是否其他對話/專案也能用？
 A：可以，只要該對話或任務用 `curl -d '<summary>' https://ntfy.xdove.win/hermes218` 明確發送，就能通知；它不是所有專案自動內建的全域通知，需在該專案的腳本、skill 或任務 prompt 中明確加入。
+
+### Q41：build 好的 `.bin` 要放哪裡，ESPConnect/OTG 才能取得？
+A：不能只留在 build 目錄。標準流程是發布到 `/share/esp32`，由 GPSRing 8802 服務掛載成 `/firmware/` 靜態路徑。LAN URL 為 `http://192.168.120.218:8802/firmware/<file>.bin`，公網 URL 為 `https://gps.xdove.win/firmware/<file>.bin`。發布指令：`scripts/publish_firmware.sh path/to/gpsring-vX.Y.Z-esp32c3.bin vX.Y.Z`，會同步更新 `manifest.json` 與 index 頁。
+
+### Q42：ntfy 為什麼沒有 blade 或明顯 UI 變化？
+A：ntfy 手機/Web 客戶端多半以純文字顯示，不能依賴自訂 blade 背景。後續 GPSRing 通知改用明顯前綴與粗體文字，例如 `【GPSRing v0.3.3｜120.218】`、`**GPSRing**`，並可加 ntfy `Title` header，讓通知列表更容易分辨專案。
+
+### Q43：之前提到的 OTA、後台批次 API、n=100/500 壓測為何要列進 TODO？
+A：已補入 `blueprint.md` 的「8.1 明確待辦」。後續不可只口頭討論，需按 Phase 推進：韌體交付包 → 靜態發布 URL → 單片 factory smoke test → OTA 小版本 → GP-02 實測 → batch upload API → background worker/job status → n=100/n=500 壓測 → 上傳狀態看板。

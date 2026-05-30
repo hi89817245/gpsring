@@ -132,6 +132,26 @@ python3 -m esptool --chip esp32c3 --port /dev/ttyACM0 flash-id
 
 使用者會將 120.218 的 USB MCU 長期留著不動，方便未來需要 rebuild、讀 serial log、factory image smoke test 或 OTA 前置驗證時直接使用。確認外包韌體交付包完整後，再用 ESPConnect 或 `esptool.py` 對**單片非 OLED 板**進行 factory image smoke test。
 
+#### 韌體 `.bin` 靜態發布路徑（2026-05-30 14:29 CST）
+
+已建立標準發布位置，避免 build 完後檔案只能在工作目錄內看得到、ESPConnect/OTA 工具抓不到：
+
+| 層級 | 路徑/URL | 用途 |
+|---|---|---|
+| 本機實體目錄 | `/share/esp32` | 放置已編譯 `.bin`、`manifest.json`、`index.html` |
+| LAN URL | `http://192.168.120.218:8802/firmware/<file>.bin` | Windows 11 / 區網工具直接下載 |
+| 公網 URL | `https://gps.xdove.win/firmware/<file>.bin` | 手機、ESPConnect、OTA 工具可直接貼 URL |
+| manifest | `https://gps.xdove.win/firmware/manifest.json` | 查最新版本、檔名、sha256 |
+
+發布指令：
+
+```bash
+cd /home/hi/workspace/gpsring
+scripts/publish_firmware.sh path/to/gpsring-vX.Y.Z-esp32c3.bin vX.Y.Z
+```
+
+原則：未來我 build 好的 `.bin` 會先放 `/share/esp32`，並用 `gps.xdove.win/firmware/` 驗證可下載；你要用 ESPConnect/OTG 時直接貼公開 URL 或手動下載即可。
+
 ---
 
 ## 2. 第一次開機檢測步驟

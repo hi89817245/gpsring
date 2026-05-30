@@ -69,7 +69,23 @@ check_anchor,北部基準檢查點,25.047800,121.517000,20
 
 1. 工程師用 Arduino IDE / PlatformIO / ESP-IDF 編譯 `.ino` 或 C++ 專案。
 2. 產生 `gpsring-vX.Y.Z-esp32c3.bin`。
-3. 首次燒錄可用 USB：
+3. **發布到可下載靜態路徑**：`.bin` 不應只留在 build 目錄，必須放到 ESPConnect/瀏覽器可直接抓取的位置。
+
+```bash
+# 將已編譯 .bin 發布到 /share/esp32，並更新 index.html / manifest.json
+scripts/publish_firmware.sh path/to/gpsring-vX.Y.Z-esp32c3.bin vX.Y.Z
+```
+
+發布後可用：
+
+| 用途 | URL |
+|---|---|
+| LAN 下載 | `http://192.168.120.218:8802/firmware/<file>.bin` |
+| 公網/ESPConnect 下載 | `https://gps.xdove.win/firmware/<file>.bin` |
+| Manifest | `https://gps.xdove.win/firmware/manifest.json` |
+
+`/share/esp32` 是實體放檔目錄；FastAPI 8802 會以 `/firmware/` 靜態路徑公開。若 ESPConnect/OTA 工具要求 URL，優先貼 `https://gps.xdove.win/firmware/<file>.bin`。
+4. 首次燒錄可用 USB：
 
 ```bash
 esptool.py --chip esp32c3 --port /dev/ttyUSB0 --baud 921600 write_flash 0x0 gpsring-v0.3.0-esp32c3.bin

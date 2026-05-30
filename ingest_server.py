@@ -5,6 +5,7 @@ import sqlite3
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Query
 from fastapi.responses import HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import psycopg2
@@ -12,8 +13,13 @@ from psycopg2.extras import RealDictCursor
 import io
 import csv
 
+FIRMWARE_DIR = os.getenv("GPSRING_FIRMWARE_DIR", "/share/esp32")
+
 # 初始化 FastAPI app
 app = FastAPI(title="GPS Pigeon Ring Ingestion API", version="1.1.0")
+
+if os.path.isdir(FIRMWARE_DIR):
+    app.mount("/firmware", StaticFiles(directory=FIRMWARE_DIR, html=True), name="firmware")
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)

@@ -406,4 +406,18 @@ v0.3.3：segment event 與賽程鑑識報告版
 4. **OTA 安全路徑**：空白板先 USB 燒入 OTA-enabled factory 韌體，再 OTA 升級小版本；不得一開始假設 OTA 可用。
 5. **後台壓測 API**：規劃 `POST /api/v1/tracks/upload/batch` 接 gzip JSON/CSV，立即回 `202 + job_id`，背景 worker 做解析與防弊分析；先測 n=100/1 分鐘集中上傳。
 6. **服務維運**：`start88` 作為 8801/8802 快速 restart 入口，`check8802` 做狀態檢查；已用 `@reboot` 讓重開機後自動執行 `start88`。WebUI 任務頁已新增 `gpsring-start88-restart` 作為手動 Run/Restart 管理入口，預設保持 paused 避免固定時間自動重啟。
-7. **本機 MCU 控制**：若 ESP32-C3 已插在 `192.168.120.218` 且 Linux 端出現 `/dev/ttyACM0`，優先在本機讀 serial / build / flash；遠端 `192.168.11.216` 僅在板子實際插到該 host 時使用。目前需先處理 `dialout` 權限與安裝 `esptool`，再做 `chip_id/flash_id` 非破壞性檢查。
+7. **本機 MCU 控制**：若 ESP32-C3 已插在 `192.168.120.218` 且 Linux 端出現 `/dev/ttyACM0`，優先在本機讀 serial / build / flash；遠端 `192.168.11.216` 僅在板子實際插到該 host 時使用。2026-05-30 reboot 後已確認 `dialout` 權限、`esptool v5.2.0`、`chip-id/flash-id` 非破壞性檢查皆成功，USB MCU 將長期留在 120.218 供後續 rebuild / serial log / factory smoke test。
+8. **韌體靜態發布**：所有 build 完成的 `.bin` 必須發布到 `/share/esp32`，由 8802 以 `/firmware/` 靜態路徑提供；下載 URL 固定為 `http://192.168.120.218:8802/firmware/<file>.bin` 與 `https://gps.xdove.win/firmware/<file>.bin`，並更新 `manifest.json`。
+
+### 8.1 明確待辦（不要只寫在討論裡）
+
+- [ ] 取得/建立第一版 OTA-enabled factory firmware package：source、build config、bootloader、partition table、factory `.bin`、OTA `.bin`、offset、sha256。
+- [ ] 將第一版 `.bin` 用 `scripts/publish_firmware.sh` 發布到 `/share/esp32`，驗證 LAN 與 public URL 可下載。
+- [ ] 單片非 OLED 板 USB factory smoke test：serial 輸出 `firmware_version/build_hash/state=init`。
+- [ ] OTA 小版本測試：從 `v0.3.3-factory` 升到 `v0.3.4-ota-test`，驗證版本變更與 rollback/fail-safe。
+- [ ] GP-02 實機 GPS 測試：室外固定、NMEA `$GNRMC/$GNGGA`、satellites、HDOP、冷/熱啟時間。
+- [ ] 實作 `POST /api/v1/tracks/upload/batch`：支援 gzip JSON/CSV，快速回 `202 + job_id`。
+- [ ] 建立 background worker/job store：解析、寫 raw points、跑 segment/event 防弊分析、回報 job status。
+- [ ] 壓測腳本 Phase A：n=100 / 1 分鐘集中上傳，測 300s 採樣與 10s 高頻兩種 payload。
+- [ ] 壓測腳本 Phase B：n=500 / 10 分鐘集中上傳，觀察 p95 latency、CPU/RAM/I/O/SQLite/DB lock。
+- [ ] UI/後台看板：上傳 job 狀態、partial/resume、失敗重試、設備上傳完成率。
