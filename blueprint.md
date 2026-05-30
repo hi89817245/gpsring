@@ -395,3 +395,14 @@ v0.3.3：segment event 與賽程鑑識報告版
 7. 後台改成 job/queue 模型：API 快速回 `202 + job_id`，背景 worker 解析、寫 DB、跑防弊分析。
 8. 預留多用途定位平台欄位：`device_type=gpsring/truck/fleet/asset`、tenant/group、feature flags；工程車/車隊應用先預留，GPSRing 完善後再另案開發。
 9. 針對 8 小時續航做資料頻率策略：10s/30s/60s/300s 動態採樣與異常時高頻模式。
+
+## 8. 2026-05-30 新階段：MUC/GPS 到貨前韌體與 OTA 驗證
+
+目前 10 pcs ESP32-C3 測試板已到貨 9 pcs，GP-02 GPS 模組已到貨，ESPConnect 初測連線成功。下一輪工作重點由 UI demo 轉為實機前驗證：
+
+1. **硬體台帳**：逐片記錄 device_id、MAC、Flash ID、是否可進 bootloader、GP-02 接線狀態。
+2. **韌體交付門檻**：外包商需交 `.ino`/source、build config、factory `.bin`、bootloader、partition table、app offset、NVS schema、OTA 範例；只交單一 `.bin` 不足以驗收。
+3. **Win11 現場流程**：若只刷 `.bin`，可用 ESPConnect/Chrome/Edge，不必安裝 Arduino IDE；要改 `.ino` 或編譯時才裝 Arduino IDE/PlatformIO。
+4. **OTA 安全路徑**：空白板先 USB 燒入 OTA-enabled factory 韌體，再 OTA 升級小版本；不得一開始假設 OTA 可用。
+5. **後台壓測 API**：規劃 `POST /api/v1/tracks/upload/batch` 接 gzip JSON/CSV，立即回 `202 + job_id`，背景 worker 做解析與防弊分析；先測 n=100/1 分鐘集中上傳。
+6. **服務維運**：`start88` 作為 8801/8802 快速 restart 入口，`check8802` 做狀態檢查；已用 `@reboot` 讓重開機後自動執行 `start88`。

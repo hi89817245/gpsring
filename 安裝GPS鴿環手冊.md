@@ -89,6 +89,36 @@ python3 -m esptool --chip esp32c3 --port /dev/ttyUSB0 --baud 921600 write_flash 
 
 ---
 
+### 1.3 v0.3.3 到貨測試：ESPConnect / Win11 / SSH 分工
+
+目前到貨狀態：10 pcs ESP32-C3 測試板已有 9 pcs 到貨；另一片 OLED 版本稍後到貨；GP-02 GPS 模組已到貨。ESPConnect 初測已能辨識 ESP32-C3，代表 USB WebSerial 連線路徑可用。
+
+#### 不想直接動程式碼時的建議路線
+
+1. **只燒錄 `.bin`：不必先安裝 Arduino IDE。** 只要有外包商或工程師提供的 `gpsring-vX.Y.Z-esp32c3.bin`，可用 ESPConnect 或 `esptool.py` 直接燒錄。
+2. **需要修改/編譯 `.ino`：才需要 Arduino IDE 或 PlatformIO。** `.ino` 是原始碼，不建議現場人員直接修改；現場測試應以已編譯 `.bin` 為主。
+3. **第一次空白板：優先 USB 燒錄。** OTA 需要裝置內已經有支援 OTA 的韌體與分割表；空白板或未確認分割表時，不應直接假設可 Wi-Fi OTA。
+4. **ESPConnect WebSerial 控制範圍：** 板子插在 Win11 時，最方便用 Win11 Chrome/Edge 開 `https://espconnect.xdove.win` 操作；板子插在 `192.168.11.216` 時，才適合由 SSH + `esptool.py` 代管燒錄。
+5. **燒錄前必問清楚 `.bin` 類型與位址：**
+   - full image / factory image：常見從 `0x0` 燒入。
+   - app-only image：常見需要依 partition table 從 `0x10000` 或指定 offset 燒入。
+   - 若外包商沒有提供 bootloader、partition table、app offset，視為交付不足，先不要大量燒。
+
+#### ESPConnect 初測紀錄（2026-05-30）
+
+| 項目 | 結果 |
+|---|---|
+| ESPConnect 版本 | v1.1.12 |
+| 晶片 | ESP32-C3 QFN32 revision v0.4 |
+| Flash | 4MB XMC，Flash ID `0x164046` |
+| USB | Espressif Systems - ESP32 Native USB / USB-JTAG Serial |
+| MAC | `14:63:93:70:77:b4` |
+| 連線 | 已成功 handshake、stub running、Ready to flash |
+| 測試 baud | 921600 可連；serial monitor 已切到 115200 |
+| 注意 | 日誌顯示 `No plausible partition table entry found`，代表目前板上可能尚無有效應用/分割表；第一次正式韌體請使用完整燒錄包或明確 offset。 |
+
+---
+
 ## 2. 第一次開機檢測步驟
 
 ### 2.1 Serial Monitor 應看到的資訊
@@ -292,3 +322,43 @@ GPS 鴿環後台應預留成「位置資料平台」，防弊只是其中一個 
 4. 後台改成 job/queue 模型：API 快速接收，背景慢慢分析。
 5. UI 下一版做「賽後鑑識報告」與「設備上傳狀態看板」。
 6. 等 GPSRing 主線穩定後，再另開工程車/車隊平台化應用。
+
+---
+
+## 9. 實機到貨前測試任務清單（2026-05-30 新階段）
+
+### Phase 1：硬體清點與 USB 連線
+
+- [x] 9/10 pcs ESP32-C3 SuperMini 測試板到貨。
+- [x] GP-02 GPS 模組到貨。
+- [ ] OLED 版本測試板到貨後補測螢幕、I2C 腳位與耗電。
+- [x] ESPConnect 可辨識 ESP32-C3 與 4MB Flash。
+- [ ] 對 9 片板逐一貼上臨時 device_id，記錄 MAC、Flash ID、是否可進 bootloader。
+
+### Phase 2：韌體初步測試（不直接改程式碼）
+
+- [ ] 向外包商/工程端取得完整交付包：`.ino`/source、PlatformIO/ESP-IDF 設定、`.bin`、bootloader、partition table、燒錄 offset、NVS 初始化格式。
+- [ ] 先選 1 片非 OLED 板做 USB 燒錄 smoke test。
+- [ ] Serial Monitor 確認 `firmware_version`、`state=init`、`device_id`、Flash free、battery/gps 欄位。
+- [ ] 接上 GP-02，在室外測 `$GNRMC/$GNGGA` 與 `gps_fixed=true`。
+
+### Phase 3：OTA 驗證
+
+- [ ] 第一版韌體必須內建 OTA 或 Web update endpoint，並回報 `build_hash`。
+- [ ] 先用 USB 燒入 OTA-enabled factory 韌體。
+- [ ] 再用 OTA 上傳小版本 `.bin`，確認版本號由 `v0.3.3-test1` 變成 `v0.3.3-test2`。
+- [ ] OTA 失敗時需能回滾或保留上一版可開機韌體；測試前不要一次刷 9 片。
+
+### Phase 4：後台與壓測 API
+
+- [ ] 既有 API：`POST /api/v1/devices/config`、`POST /api/v1/tracks/ingest`、`POST /api/v1/tracks/upload/csv` 可供 POC。
+- [ ] 新增規劃 API：`POST /api/v1/tracks/upload/batch`，接收 gzip JSON/CSV，立即回 `202 + job_id`。
+- [ ] 背景 worker 寫入 raw points，再跑 segment/event analysis。
+- [ ] 壓測先跑 n=100 / 1 分鐘集中上傳，觀察 p95 latency、CPU/RAM/I/O/DB lock。
+
+### Phase 5：服務啟動與通知
+
+- [x] `start88` / `check8802` 已同步到 `~/.local/bin`。
+- [x] 已加入 crontab `@reboot`，重開機後 10 秒自動執行 `start88`，log：`/tmp/gpsring-start88-boot.log`。
+- [ ] 若未來要更正式，可改為 systemd service + healthcheck timer。
+- [x] 完成階段成果後，以 `https://ntfy.xdove.win/hermes218` 發送彙整通知。

@@ -107,3 +107,20 @@ A：先用 n=100 模擬 1 分鐘內集中歸返上傳，每台 96 點（300 秒�
 ### Q30：工程車/車隊等非防弊用途要現在做嗎？
 A：先不要展開成大系統。GPSRing 主線先完善，但資料模型應預留 `device_type`、tenant/group、feature flags。未來可讓工程車、車隊、資產追蹤共用定位平台；差別是 GPS 鴿環啟用 anti_fraud，工程車偏 realtime tracking 與 QR 免登入分群。
 
+## 2026-05-30：MUC/GPS 到貨測試新階段
+
+### Q31：目前硬體到貨與 ESPConnect 初測狀態？
+A：10 pcs ESP32-C3 測試板已有 9 pcs 到貨，另 1 pcs OLED 版本稍後到貨；GP-02 GPS 模組已到貨。ESPConnect v1.1.12 已成功連上 ESP32-C3 QFN32 revision v0.4，Flash 為 4MB XMC，MAC `14:63:93:70:77:b4`，USB-JTAG/Serial handshake 成功並顯示 Ready to flash。
+
+### Q32：Win11 是否一定要安裝 Arduino IDE 才能放韌體？
+A：不一定。若只要燒錄已編譯的 `.bin`，Win11 用 Chrome/Edge + ESPConnect 或 `python -m esptool` 即可，不必先安裝 Arduino IDE。只有需要打開 `.ino`、修改原始碼或自行編譯時，才需要 Arduino IDE 或 PlatformIO。使用者不想直接動程式碼時，應要求外包商交付可直接燒錄的 `.bin` 與完整 offset/partition 說明。
+
+### Q33：ESPConnect 由 Web 控制還是 SSH 到 192.168.11.216 比較方便？
+A：WebSerial 依附「板子插在哪台電腦」。板子插在 Win11 時，最方便由 Win11 瀏覽器直接控制 ESPConnect；板子插在 `192.168.11.216` 時，才適合用 SSH `root@192.168.11.216` 搭配 `esptool.py` 代管。已驗證 192.168.11.216 可用 `gscc-netbird` key 登入，hostname 為 `espconnect`，但目前未看到 Espressif/USB serial 裝置掛載。
+
+### Q34：OTA 要怎麼先測才安全？
+A：OTA 不是空白板的第一步。先用 USB 燒入 OTA-enabled factory 韌體，確認 Serial 輸出 `firmware_version/build_hash/state=init`，再用 OTA 上傳小版本 `.bin`，驗證版本號變更且重開機可回到 `state=init`。若外包商沒有提供 bootloader、partition table、app offset 與 rollback 策略，不應一次刷 9 片。
+
+### Q35：start88 與重開機自動啟動如何處理？
+A：`start88` / `check8802` 已同步到 `~/.local/bin`。本次新增 crontab `@reboot /bin/bash -lc "sleep 10; /home/hi/.local/bin/start88 >> /tmp/gpsring-start88-boot.log 2>&1"`，重開機後會自動拉起 8801/8802；手動重啟仍直接執行 `start88`，狀態檢查用 `check8802`。
+

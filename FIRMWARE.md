@@ -86,6 +86,16 @@ esptool.py --chip esp32c3 --port COM5 --baud 921600 write_flash 0x0 gpsring-v0.3
 
 > 外包要求：代工商必須交付 `.ino`/C++ source、PlatformIO 或 ESP-IDF build 設定、量產 `.bin`、分割表、燒錄位址、NVS 初始化格式，以及 OTA/ESPConnect 範例。只交 `.bin` 不足以驗收。
 
+### 2026-05-30 ESP32-C3 到貨初測補充
+
+目前 ESPConnect 已可成功辨識 ESP32-C3 QFN32 revision v0.4、4MB Flash、USB-JTAG/Serial，並進入 `Ready to flash`。這代表 USB 燒錄鏈路可用，但日誌顯示 `No plausible partition table entry found`，因此現階段應按「空白/未初始化板」處理：
+
+1. 第一次正式燒錄使用 USB + 完整 factory image；不要先假設可 Wi-Fi OTA。
+2. 若只拿到 app-only `.bin`，必須取得 partition table 與 app offset（常見但不保證為 `0x10000`）。
+3. OTA 驗證需分兩階段：先 USB 燒入 OTA-enabled 韌體，再 OTA 小版本升級。
+4. 現場 Win11 若只燒 `.bin`，不必安裝 Arduino IDE；用 ESPConnect/Edge/Chrome 即可。要改 `.ino` 或重編譯時才裝 Arduino IDE/PlatformIO。
+5. 若板子插在 `192.168.11.216`，可由 SSH + `esptool.py` 代管；若板子插在 Win11，WebSerial 必須由 Win11 瀏覽器操作。
+
 ---
 
 ## 1. 完整韌體原始碼 (`firmware_nvs_cache.ino`)
