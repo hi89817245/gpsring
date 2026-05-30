@@ -129,7 +129,13 @@ A：`start88` / `check8802` 已同步到 `~/.local/bin`。本次新增 crontab `
 A：不用。若 Windows 11 或本機 `192.168.120.218` 已經能看到 ESPConnect 連線，且 Linux 端出現 `/dev/ttyACM0`，把 MCU 留在本機更有效率，Hermes 可以直接 build、讀 serial log、用 `esptool.py` 做非破壞性 chip/flash 檢查。遠端 `192.168.11.216` 只適合板子實際插在那台 ESPConnect host 時使用。
 
 ### Q37：目前本機 `192.168.120.218` 還缺什麼才能由 Hermes 直接燒錄？
-A：目前 `/dev/ttyACM0` 權限是 `root:dialout 660`，Hermes 執行使用者 `hi` 尚未在 `dialout` 群組，直接開 serial 會 `Permission denied`；另外 `python3 -m esptool` 尚未可用。先在本機執行 `sudo usermod -aG dialout hi` 後重新登入/重啟 WebUI/container，再安裝 `esptool`，最後先跑 `chip_id` / `flash_id`，不要立刻燒錄。
+A：已解除。重開機後 `hi` 已在 `dialout` 群組，`/dev/ttyACM0` 權限可讀寫，`esptool v5.2.0` 可用；已用非破壞性指令確認 `chip-id` / `flash-id` 成功讀到 ESP32-C3 QFN32 revision v0.4、4MB XMC Flash、MAC `14:63:93:70:77:b4`。使用者會將 120.218 的 USB MCU 長期留著不動，方便未來需要 rebuild / serial log / factory image smoke test 時直接使用。
 
 ### Q38：`start88` 可以放到 WebUI 任務頁嗎？
 A：可以，已新增 `gpsring-start88-restart` 排程任務，任務腳本會執行 `start88`、`check8802`、HTTP probes，並送 ntfy 摘要。此任務目前保持 paused，目的是讓它出現在任務頁供手動 Run/Restart 管理，不讓它每天自動重啟服務。
+
+### Q39：`gpsring-start88-restart` 顯示「已暫停」會影響 reboot 自動啟動嗎？
+A：不影響。reboot 自動啟動走的是系統 crontab：`@reboot ... start88 >> /tmp/gpsring-start88-boot.log`；WebUI 任務頁的 `gpsring-start88-restart` 是另一個 Hermes cron job，只作為手動 Run/Restart 入口。保持 paused 反而比較安全，避免每天 05:00 固定重啟服務。
+
+### Q40：`ntfy.xdove.win/hermes218` 是否其他對話/專案也能用？
+A：可以，只要該對話或任務用 `curl -d '<summary>' https://ntfy.xdove.win/hermes218` 明確發送，就能通知；它不是所有專案自動內建的全域通知，需在該專案的腳本、skill 或任務 prompt 中明確加入。

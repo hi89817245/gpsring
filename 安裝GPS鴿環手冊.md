@@ -119,25 +119,18 @@ python3 -m esptool --chip esp32c3 --port /dev/ttyUSB0 --baud 921600 write_flash 
 
 #### 本機 192.168.120.218 直控補充（2026-05-30 13:41 CST）
 
-目前本機 `ai2-docker / 192.168.120.218` 已看到測試板序列埠：`/dev/ttyACM0`，代表 MCU 插在本機就可以作為主要燒錄/讀 log 環境，**不需要第一次一定接到遠端 `192.168.11.216`**。但當前權限為 `root:dialout 660`，Hermes 執行使用者 `hi` 尚未在 `dialout` 群組，因此直接開啟 `/dev/ttyACM0` 會出現 `Permission denied`。處理方式：
+目前本機 `ai2-docker / 192.168.120.218` 已看到測試板序列埠：`/dev/ttyACM0`，代表 MCU 插在本機就可以作為主要燒錄/讀 log 環境，**不需要第一次一定接到遠端 `192.168.11.216`**。2026-05-30 重開機後已確認：`hi` 在 `dialout` 群組、`/dev/ttyACM0 open_rw=OK`、`esptool v5.2.0` 可用，且非破壞性讀取成功：ESP32-C3 QFN32 revision v0.4、4MB XMC Flash、MAC `14:63:93:70:77:b4`。
+
+日後若重開機或換板後 serial 權限又異常，可重新檢查：
 
 ```bash
-# 在 192.168.120.218 主機執行一次，之後重新登入或重啟 WebUI/container
-sudo usermod -aG dialout hi
-
-# 若只要臨時放行目前插上的板子，可用：
-sudo chmod a+rw /dev/ttyACM0
+id
+ls -l /dev/ttyACM0
+python3 -m esptool --chip esp32c3 --port /dev/ttyACM0 chip-id
+python3 -m esptool --chip esp32c3 --port /dev/ttyACM0 flash-id
 ```
 
-權限放行後，先做非破壞性讀取，不要立刻燒錄：
-
-```bash
-python3 -m pip install --user esptool
-python3 -m esptool --chip esp32c3 --port /dev/ttyACM0 chip_id
-python3 -m esptool --chip esp32c3 --port /dev/ttyACM0 flash_id
-```
-
-確認 chip/flash 可讀、外包韌體交付包完整後，再用 ESPConnect 或 `esptool.py` 對**單片非 OLED 板**進行 factory image smoke test。
+使用者會將 120.218 的 USB MCU 長期留著不動，方便未來需要 rebuild、讀 serial log、factory image smoke test 或 OTA 前置驗證時直接使用。確認外包韌體交付包完整後，再用 ESPConnect 或 `esptool.py` 對**單片非 OLED 板**進行 factory image smoke test。
 
 ---
 
