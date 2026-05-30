@@ -124,3 +124,12 @@ A：OTA 不是空白板的第一步。先用 USB 燒入 OTA-enabled factory 韌�
 ### Q35：start88 與重開機自動啟動如何處理？
 A：`start88` / `check8802` 已同步到 `~/.local/bin`。本次新增 crontab `@reboot /bin/bash -lc "sleep 10; /home/hi/.local/bin/start88 >> /tmp/gpsring-start88-boot.log 2>&1"`，重開機後會自動拉起 8801/8802；手動重啟仍直接執行 `start88`，狀態檢查用 `check8802`。
 
+
+### Q36：第一次一定要把 MCU 接到遠端 `192.168.11.216` 嗎？
+A：不用。若 Windows 11 或本機 `192.168.120.218` 已經能看到 ESPConnect 連線，且 Linux 端出現 `/dev/ttyACM0`，把 MCU 留在本機更有效率，Hermes 可以直接 build、讀 serial log、用 `esptool.py` 做非破壞性 chip/flash 檢查。遠端 `192.168.11.216` 只適合板子實際插在那台 ESPConnect host 時使用。
+
+### Q37：目前本機 `192.168.120.218` 還缺什麼才能由 Hermes 直接燒錄？
+A：目前 `/dev/ttyACM0` 權限是 `root:dialout 660`，Hermes 執行使用者 `hi` 尚未在 `dialout` 群組，直接開 serial 會 `Permission denied`；另外 `python3 -m esptool` 尚未可用。先在本機執行 `sudo usermod -aG dialout hi` 後重新登入/重啟 WebUI/container，再安裝 `esptool`，最後先跑 `chip_id` / `flash_id`，不要立刻燒錄。
+
+### Q38：`start88` 可以放到 WebUI 任務頁嗎？
+A：可以，已新增 `gpsring-start88-restart` 排程任務，任務腳本會執行 `start88`、`check8802`、HTTP probes，並送 ntfy 摘要。此任務目前保持 paused，目的是讓它出現在任務頁供手動 Run/Restart 管理，不讓它每天自動重啟服務。

@@ -405,4 +405,5 @@ v0.3.3：segment event 與賽程鑑識報告版
 3. **Win11 現場流程**：若只刷 `.bin`，可用 ESPConnect/Chrome/Edge，不必安裝 Arduino IDE；要改 `.ino` 或編譯時才裝 Arduino IDE/PlatformIO。
 4. **OTA 安全路徑**：空白板先 USB 燒入 OTA-enabled factory 韌體，再 OTA 升級小版本；不得一開始假設 OTA 可用。
 5. **後台壓測 API**：規劃 `POST /api/v1/tracks/upload/batch` 接 gzip JSON/CSV，立即回 `202 + job_id`，背景 worker 做解析與防弊分析；先測 n=100/1 分鐘集中上傳。
-6. **服務維運**：`start88` 作為 8801/8802 快速 restart 入口，`check8802` 做狀態檢查；已用 `@reboot` 讓重開機後自動執行 `start88`。
+6. **服務維運**：`start88` 作為 8801/8802 快速 restart 入口，`check8802` 做狀態檢查；已用 `@reboot` 讓重開機後自動執行 `start88`。WebUI 任務頁已新增 `gpsring-start88-restart` 作為手動 Run/Restart 管理入口，預設保持 paused 避免固定時間自動重啟。
+7. **本機 MCU 控制**：若 ESP32-C3 已插在 `192.168.120.218` 且 Linux 端出現 `/dev/ttyACM0`，優先在本機讀 serial / build / flash；遠端 `192.168.11.216` 僅在板子實際插到該 host 時使用。目前需先處理 `dialout` 權限與安裝 `esptool`，再做 `chip_id/flash_id` 非破壞性檢查。

@@ -98,7 +98,7 @@ python3 -m esptool --chip esp32c3 --port /dev/ttyUSB0 --baud 921600 write_flash 
 1. **只燒錄 `.bin`：不必先安裝 Arduino IDE。** 只要有外包商或工程師提供的 `gpsring-vX.Y.Z-esp32c3.bin`，可用 ESPConnect 或 `esptool.py` 直接燒錄。
 2. **需要修改/編譯 `.ino`：才需要 Arduino IDE 或 PlatformIO。** `.ino` 是原始碼，不建議現場人員直接修改；現場測試應以已編譯 `.bin` 為主。
 3. **第一次空白板：優先 USB 燒錄。** OTA 需要裝置內已經有支援 OTA 的韌體與分割表；空白板或未確認分割表時，不應直接假設可 Wi-Fi OTA。
-4. **ESPConnect WebSerial 控制範圍：** 板子插在 Win11 時，最方便用 Win11 Chrome/Edge 開 `https://espconnect.xdove.win` 操作；板子插在 `192.168.11.216` 時，才適合由 SSH + `esptool.py` 代管燒錄。
+4. **ESPConnect WebSerial 控制範圍：** 板子插在 Win11 時，最方便用 Win11 Chrome/Edge 開 `https://espconnect.xdove.win` 操作；板子插在 `192.168.11.216` 時，才適合由 SSH + `esptool.py` 代管燒錄。若板子已插在本機 `192.168.120.218` 且出現 `/dev/ttyACM0`，不必特地把 MCU 拿去遠端 `192.168.11.216`；讓 Hermes 在本機 build/flash/讀 serial log 會更有效率。
 5. **燒錄前必問清楚 `.bin` 類型與位址：**
    - full image / factory image：常見從 `0x0` 燒入。
    - app-only image：常見需要依 partition table 從 `0x10000` 或指定 offset 燒入。
@@ -116,6 +116,28 @@ python3 -m esptool --chip esp32c3 --port /dev/ttyUSB0 --baud 921600 write_flash 
 | 連線 | 已成功 handshake、stub running、Ready to flash |
 | 測試 baud | 921600 可連；serial monitor 已切到 115200 |
 | 注意 | 日誌顯示 `No plausible partition table entry found`，代表目前板上可能尚無有效應用/分割表；第一次正式韌體請使用完整燒錄包或明確 offset。 |
+
+#### 本機 192.168.120.218 直控補充（2026-05-30 13:41 CST）
+
+目前本機 `ai2-docker / 192.168.120.218` 已看到測試板序列埠：`/dev/ttyACM0`，代表 MCU 插在本機就可以作為主要燒錄/讀 log 環境，**不需要第一次一定接到遠端 `192.168.11.216`**。但當前權限為 `root:dialout 660`，Hermes 執行使用者 `hi` 尚未在 `dialout` 群組，因此直接開啟 `/dev/ttyACM0` 會出現 `Permission denied`。處理方式：
+
+```bash
+# 在 192.168.120.218 主機執行一次，之後重新登入或重啟 WebUI/container
+sudo usermod -aG dialout hi
+
+# 若只要臨時放行目前插上的板子，可用：
+sudo chmod a+rw /dev/ttyACM0
+```
+
+權限放行後，先做非破壞性讀取，不要立刻燒錄：
+
+```bash
+python3 -m pip install --user esptool
+python3 -m esptool --chip esp32c3 --port /dev/ttyACM0 chip_id
+python3 -m esptool --chip esp32c3 --port /dev/ttyACM0 flash_id
+```
+
+確認 chip/flash 可讀、外包韌體交付包完整後，再用 ESPConnect 或 `esptool.py` 對**單片非 OLED 板**進行 factory image smoke test。
 
 ---
 
@@ -360,5 +382,6 @@ GPS 鴿環後台應預留成「位置資料平台」，防弊只是其中一個 
 
 - [x] `start88` / `check8802` 已同步到 `~/.local/bin`。
 - [x] 已加入 crontab `@reboot`，重開機後 10 秒自動執行 `start88`，log：`/tmp/gpsring-start88-boot.log`。
+- [x] 已新增 WebUI 排程任務 `gpsring-start88-restart`，可在任務頁手動 Run/Restart；目前保持 paused，避免每天自動重啟。
 - [ ] 若未來要更正式，可改為 systemd service + healthcheck timer。
 - [x] 完成階段成果後，以 `https://ntfy.xdove.win/hermes218` 發送彙整通知。
