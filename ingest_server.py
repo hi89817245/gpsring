@@ -4,8 +4,10 @@ import logging
 import sqlite3
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Query
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+import mimetypes
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import psycopg2
@@ -18,8 +20,31 @@ FIRMWARE_DIR = os.getenv("GPSRING_FIRMWARE_DIR", "/share/esp32")
 # 初始化 FastAPI app
 app = FastAPI(title="GPS Pigeon Ring Ingestion API", version="1.1.0")
 
-if os.path.isdir(FIRMWARE_DIR):
-    app.mount("/firmware", StaticFiles(directory=FIRMWARE_DIR, html=True), name="firmware")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+# CORS-aware firmware file route (取代 StaticFiles mount，確保 CORS header 正確傳遞)
+@app.options("/firmware/{filename:path}")
+async def firmware_options(filename: str):
+    return Response(headers={
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+    })
+
+@app.get("/firmware/{filename:path}")
+async def firmware_file(filename: str):
+    """提供 /firmware 下的檔案，並加 CORS header 供 216 ESPConnect 跨域存取"""
+    fpath = os.path.join(FIRMWARE_DIR, filename)
+    if not os.path.isfile(fpath):
+        raise HTTPException(status_code=404, detail="firmware file not found")
+    mime, _ = mimetypes.guess_type(fpath)
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+    }
+    return FileResponse(fpath, media_type=mime or "application/octet-stream", headers=headers)
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
