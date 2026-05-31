@@ -9,7 +9,7 @@
 #include <HTTPClient.h>
 
 #ifndef GPSRING_FIRMWARE_VERSION
-#define GPSRING_FIRMWARE_VERSION "v0.3.4"
+#define GPSRING_FIRMWARE_VERSION "v0.3.6"
 #endif
 #ifndef GPSRING_DEVICE_PREFIX
 #define GPSRING_DEVICE_PREFIX "G0703"
@@ -149,6 +149,8 @@ double   lastLon    = 0.0;
 uint32_t heartbeatIntervalMs = 10000;  // 可 NVS 調整，預設 10s
 String   wifiSsid   = "";
 String   wifiPass   = "";
+String   ringno1    = "";   // 腳環號（NVS ringno1）
+String   noteText   = "";   // 備註（NVS note）
 
 String macCompact() {
   uint64_t mac = ESP.getEfuseMac();
@@ -199,7 +201,9 @@ String jsonStatus() {
   json += "\"littlefs_used\":" + String(LittleFS.usedBytes()) + ",";
   json += "\"ota_partition\":\"" + String(running ? running->label : "unknown") + "\",";
   json += "\"hb_interval_ms\":" + String(heartbeatIntervalMs) + ",";
-  json += "\"wifi_ssid\":\"" + wifiSsid + "\"";
+  json += "\"wifi_ssid\":\"" + wifiSsid + "\",";
+  json += "\"ringno1\":\"" + ringno1 + "\",";
+  json += "\"note\":\"" + noteText + "\"";
   json += "}";
   return json;
 }
@@ -372,6 +376,8 @@ void setupWiFiAndOtaWeb() {
     wifiSsid = prefs.getString("wifi_ssid", GPSRING_WIFI_SSID);
     wifiPass = prefs.getString("wifi_pass", GPSRING_WIFI_PASS);
     heartbeatIntervalMs = prefs.getUInt("hb_interval", 10000);
+    ringno1   = prefs.getString("ringno1", "");
+    noteText  = prefs.getString("note", "");
     prefs.end();
   }
   WiFi.mode(WIFI_STA);
@@ -549,12 +555,67 @@ void loop() {
   if (Serial.available()) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim(); cmd.toUpperCase();
+    // 需保留原始大小寫的指令（備註/腳環號），先檢查 prefix
+    String rawCmd = cmd;  // toUpperCase 後的版本
+    // 對 SET_NOTE / SET_RINGNO 用原始輸入（重新讀一次前已 toUpper，故從 upper prefix 之後擷取即可）
     if      (cmd == "STATUS") { Serial.println("[GPSRing] JSON_STATUS " + jsonStatus()); }
     else if (cmd == "GPS") { gpsSeen=false; gpsFixed=false; lastNmea=""; probeGps(GPS_PROBE_MS); printStatusLine("[GPSRing][GPS]"); }
     else if (cmd == "REBOOT")  { Serial.println("[GPSRing] rebooting"); delay(200); ESP.restart(); }
     else if (cmd == "RACING")  { deviceState = STATE_RACING;  Serial.println("[GPSRing] state -> racing"); }
     else if (cmd == "CARING")  { deviceState = STATE_CARING;  Serial.println("[GPSRing] state -> caring"); }
     else if (cmd == "STANDBY") { deviceState = STATE_STANDBY; Serial.println("[GPSRing] state -> standby"); }
+    // ── RingOps /otg 進階指令 ──────────────────────────────────────
+    else if (cmd.startsWith("SET_FID:")) {
+      uint32_t fid = (uint32_t)cmd.substring(8).toInt();
+      if (fid >= 1 && fid <= 99999) {
+        prefs.begin("gpsring", false); prefs.putUInt("factory_id", fid); prefs.end();
+        factoryId = fid;
+        Serial.printf("[GPSRing] SET_FID OK factory_id=%lu\n", (unsigned long)fid);
+      } else { Serial.println("[GPSRing] SET_FID ERR range 1-99999"); }
+    }
+    else if (cmd.startsWith("SET_WIFI:")) {
+      String payload = cmd.substring(9);
+      int sep = payload.indexOf('|');
+      String ns = sep >= 0 ? payload.substring(0, sep) : payload;
+      String np = sep >= 0 ? payload.substring(sep + 1) : "";
+      prefs.begin("gpsring", false);
+      if (ns.length() > 0) { prefs.putString("wifi_ssid", ns); wifiSsid = ns; }
+      if (np.length() > 0) { prefs.putString("wifi_pass", np); wifiPass = np; }
+      prefs.end();
+      Serial.printf("[GPSRing] SET_WIFI OK ssid=%s\n", ns.c_str());
+    }
+    else if (cmd.startsWith("SET_RINGNO:")) {
+      String rno = cmd.substring(11);
+      prefs.begin("gpsring", false); prefs.putString("ringno1", rno); prefs.end();
+      Serial.printf("[GPSRing] SET_RINGNO OK ringno1=%s\n", rno.c_str());
+    }
+    else if (cmd.startsWith("SET_NOTE:")) {
+      String note = cmd.substring(9);
+      prefs.begin("gpsring", false); prefs.putString("note", note); prefs.end();
+      Serial.println("[GPSRing] SET_NOTE OK");
+    }
+    else if (cmd.startsWith("SET_HB:")) {
+      uint32_t ms = (uint32_t)cmd.substring(7).toInt();
+      if (ms >= 5000 && ms <= 3600000) {
+        prefs.begin("gpsring", false); prefs.putUInt("hb_interval", ms); prefs.end();
+        heartbeatIntervalMs = ms;
+        Serial.printf("[GPSRing] SET_HB OK hb_interval=%lu\n", (unsigned long)ms);
+      } else { Serial.println("[GPSRing] SET_HB ERR range 5000-3600000"); }
+    }
+    else if (cmd == "DUMP_GPS") {
+      Serial.println("[GPSRing] JSON_GPS {\"lat\":" + String(lastLat, 6) +
+        ",\"lon\":" + String(lastLon, 6) +
+        ",\"gps_fixed\":" + String(gpsFixed ? "true" : "false") +
+        ",\"last_nmea\":\"" + lastNmea.substring(0, 80) + "\"}");
+    }
+    else if (cmd == "CLEAR_NVS") {
+      prefs.begin("gpsring", false); prefs.clear(); prefs.end();
+      Serial.println("[GPSRing] CLEAR_NVS OK; reboot to re-register");
+    }
+    else if (cmd == "FACTORY_RESET") {
+      prefs.begin("gpsring", false); prefs.clear(); prefs.end();
+      Serial.println("[GPSRing] FACTORY_RESET OK; rebooting"); delay(300); ESP.restart();
+    }
   }
 
   static uint32_t lastBeat = 0;

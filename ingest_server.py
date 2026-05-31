@@ -269,7 +269,29 @@ def get_favicon_ico():
 def get_favicon_svg():
     return None
 
-# --- 升級：支援前端與靜態網頁合併託管 ---
+# --- RingOps 鴿環作業站 ---
+@app.get("/otg", response_class=HTMLResponse)
+def ringops_otg():
+    """RingOps 鴿環作業站 Web UI"""
+    with open("otg.html", "r", encoding="utf-8") as f:
+        html_content = f.read()
+    return HTMLResponse(
+        content=html_content,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+    )
+
+@app.get("/api/v1/firmware/list")
+def firmware_list():
+    """列出 firmware/ 目錄下的 .bin 檔案清單"""
+    import os
+    fw_dir = os.path.join(os.path.dirname(__file__), "firmware")
+    try:
+        files = sorted([f for f in os.listdir(fw_dir) if f.endswith(".bin")])
+    except FileNotFoundError:
+        files = []
+    return {"files": files, "base_url": "/firmware/"}
+
+
 @app.get("/", response_class=HTMLResponse)
 def read_root():
     """提供前端主頁面，實現 Web 與 API 同一 Port 運行 (加上防快取標頭)"""
