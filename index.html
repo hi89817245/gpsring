@@ -391,7 +391,50 @@ window.onerror = function(message, source, lineno, colno, error) {
         
         // 建立一個官方放飛起點圖層組
         const releasePointsGroup = L.layerGroup();
+        // ── Live GPS 鴿環圖層 ──
+        const liveGpsGroup = L.layerGroup().addTo(map);
+        const liveGpsMarkers = {}; // key=device_id
+        const LIVE_GPS_ICON = {
+          standby:       "🟡", gps_searching: "🔵", gps_fixed: "🟢",
+          caring:        "🟠", racing:        "🔴"
+        };
+        async function refreshLiveGps() {
+          try {
+            const apiHost = `${window.location.protocol}//${window.location.hostname}:${window.location.port}`;
+            const res = await fetch(`${apiHost}/api/v1/devices/status`);
+            if (!res.ok) return;
+            const data = await res.json();
+            // 先隱藏全部，再更新在線的
+            Object.values(liveGpsMarkers).forEach(m => m.setOpacity(0.3));
+            for (const dev of data.devices) {
+              if (!dev.lat || !dev.lon || (dev.lat === 0 && dev.lon === 0)) continue;
+              const icon = LIVE_GPS_ICON[dev.state] || "⚫";
+              const label = `${icon} ${dev.device_id.slice(-8)}<br>` +
+                `<small>${dev.ringno1 || dev.factory_id || '-'} ｜ ${dev.firmware_version}</small>`;
+              const popup = `<b>${dev.device_id}</b><br>` +
+                `狀態: ${dev.state} | 在線: ${dev.online ? '✅' : '❌'}<br>` +
+                `環號: ${dev.ringno1 || '未配對'} | fid: ${dev.factory_id}<br>` +
+                `GPS: ${dev.gps_fixed ? '定位✅' : '搜尋中'} (${dev.satellites || 0}顆)<br>` +
+                `版本: ${dev.firmware_version} | IP: ${dev.ip}<br>` +
+                `最後心跳: ${dev.last_seen_iso}`;
+              if (liveGpsMarkers[dev.device_id]) {
+                liveGpsMarkers[dev.device_id].setLatLng([dev.lat, dev.lon])
+                  .setPopupContent(popup).setOpacity(dev.online ? 1 : 0.4);
+              } else {
+                const mk = L.marker([dev.lat, dev.lon], {
+                  icon: L.divIcon({ className:'', html:`<div style="font-size:22px;line-height:1">${icon}</div>`, iconSize:[28,28], iconAnchor:[14,14] })
+                }).bindPopup(popup).bindTooltip(label, {permanent:false, direction:'top'});
+                liveGpsGroup.addLayer(mk);
+                liveGpsMarkers[dev.device_id] = mk;
+                mk.setOpacity(dev.online ? 1 : 0.4);
+              }
+            }
+          } catch(e) { /* silent */ }
+        }
+        refreshLiveGps();
+        setInterval(refreshLiveGps, 15000); // 15s 自動刷新
         const overlayMaps = {
+            "📡 GPS鴿環即時位置": liveGpsGroup,
             "⚓ 官方放飛關卡起點": releasePointsGroup,
             "🌧️ 全球即時降雨雷達波": rainRadarLayer,
             "🛤️ 鐵路/高鐵高精度路網": railwayLayer
@@ -1664,7 +1707,7 @@ async function uploadCSV(event) {
                 }
             } catch (err) {
                 console.error("CSV upload request error:", err);
-                statusDiv.innerText = "連線 API 伺服器失敗，請確認 Port 8801 運作中。";
+                statusDiv.innerText = "連線 API 伺服器失敗，請確認後台服務是否啟動（start88）。";
                 statusDiv.className = "text-[10px] text-red-400 italic";
             }
         }

@@ -16,7 +16,7 @@ from psycopg2.extras import RealDictCursor
 import io
 import csv
 
-FIRMWARE_DIR = os.getenv("GPSRING_FIRMWARE_DIR", "/share/esp32")
+FIRMWARE_DIR = os.getenv("GPSRING_FIRMWARE_DIR", "/home/hi/workspace/gpsring/firmware")
 
 # 初始化 FastAPI app
 app = FastAPI(title="GPS Pigeon Ring Ingestion API", version="1.1.0")
@@ -388,7 +388,7 @@ async def upload_csv_tracks(
 # ── 裝置即時狀態監控 ───────────────────────────────────────────
 class HeartbeatPayload(BaseModel):
     device_id: str
-    state: str = "init"
+    state: str = "standby"
     firmware_version: str = ""
     build_hash: str = ""
     mac: str = ""
@@ -398,11 +398,27 @@ class HeartbeatPayload(BaseModel):
     boot_count: int = 0
     free_heap: int = 0
     battery_raw: int = 0
+    factory_id: int = 0
+    lat: float = 0.0
+    lon: float = 0.0
+    satellites: int = 0
+
+# NFC 配對：GPS鴿環 ↔ 鴿環號配對表（記憶體快取；未來可持久化至 DB）
+# key: mac 或 device_id, value: {ringno1, factory_id, paired_at, ...}
+_nfc_pairings: dict = {}
+
+class NfcPairPayload(BaseModel):
+    device_id: str = ""
+    mac: str = ""
+    factory_id: int = 0
+    ringno1: str          # 第一鴿環號（原始賽鴿環號）
+    action: str = "pair"  # pair | checkin | checkout
 
 @app.post("/api/v1/devices/heartbeat")
 def receive_heartbeat(payload: HeartbeatPayload):
-    """MCU 定期上報心跳（每 10s）— 存入記憶體快取"""
-    _device_heartbeats[payload.device_id] = {
+    """MCU 定期上報心跳 — 存入記憶體快取，含 lat/lon/factory_id"""
+    key = payload.device_id or payload.mac
+    _device_heartbeats[key] = {
         "state": payload.state,
         "firmware_version": payload.firmware_version,
         "build_hash": payload.build_hash,
@@ -413,10 +429,56 @@ def receive_heartbeat(payload: HeartbeatPayload):
         "boot_count": payload.boot_count,
         "free_heap": payload.free_heap,
         "battery_raw": payload.battery_raw,
+        "factory_id": payload.factory_id,
+        "lat": payload.lat,
+        "lon": payload.lon,
+        "satellites": payload.satellites,
         "last_seen": time.time(),
+        # 若已配對，附加 ringno1
+        "ringno1": _nfc_pairings.get(key, {}).get("ringno1", ""),
     }
-    logger.info(f"[HEARTBEAT] {payload.device_id} state={payload.state} ip={payload.ip}")
-    return {"status": "ok", "device_id": payload.device_id}
+    logger.info(f"[HEARTBEAT] {key} state={payload.state} ip={payload.ip} lat={payload.lat} lon={payload.lon}")
+    return {"status": "ok", "device_id": key}
+
+@app.post("/api/v1/devices/nfc_pair")
+def nfc_pair(payload: NfcPairPayload):
+    """NFC 配對：GPS鴿環 ↔ 第一鴿環環號
+    action=pair    → 出廠配對（factory_id + ringno1 綁定）
+    action=checkin → 上車感應，觸發後台通知 MCU 切換 CARING（未來擴充）
+    action=checkout→ 鴿返，解除 caring 狀態
+    """
+    key = payload.device_id or payload.mac
+    if not key:
+        raise HTTPException(status_code=400, detail="device_id or mac required")
+    now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    rec = _nfc_pairings.get(key, {})
+    if payload.action in ("pair", "checkin"):
+        rec.update({
+            "device_id": payload.device_id,
+            "mac": payload.mac,
+            "factory_id": payload.factory_id,
+            "ringno1": payload.ringno1,
+            "action": payload.action,
+            "updated_at": now_iso,
+        })
+        _nfc_pairings[key] = rec
+        # 若裝置在線，同步更新 heartbeat 快取的 ringno1
+        if key in _device_heartbeats:
+            _device_heartbeats[key]["ringno1"] = payload.ringno1
+            if payload.action == "checkin":
+                _device_heartbeats[key]["state"] = "caring"
+    elif payload.action == "checkout":
+        rec["action"] = "checkout"
+        rec["updated_at"] = now_iso
+        _nfc_pairings[key] = rec
+    logger.info(f"[NFC] {payload.action} device={key} ringno1={payload.ringno1}")
+    return {"status": "ok", "action": payload.action, "device": key, "ringno1": payload.ringno1}
+
+@app.get("/api/v1/devices/nfc_pairs")
+def list_nfc_pairs():
+    """列出所有 NFC 配對記錄"""
+    return {"total": len(_nfc_pairings), "pairs": list(_nfc_pairings.values())}
+
 
 @app.get("/api/v1/devices/status")
 def get_devices_status():
@@ -433,8 +495,8 @@ def get_devices_status():
             **info,
             "last_seen_iso": datetime.fromtimestamp(info["last_seen"]).strftime("%Y-%m-%d %H:%M:%S"),
         })
-    # 依 state 排序：racing > caring > gps_fixed > gps_searching > init > offline
-    _state_order = {"racing": 0, "caring": 1, "gps_fixed": 2, "gps_searching": 3, "init": 4}
+    # 依 state 排序：racing > caring > gps_fixed > gps_searching > standby > offline
+    _state_order = {"racing": 0, "caring": 1, "gps_fixed": 2, "gps_searching": 3, "standby": 4, "init": 4}
     result.sort(key=lambda x: (_state_order.get(x["state"], 9) if x["online"] else 10, x["device_id"]))
     return {"total": len(result), "online": sum(1 for x in result if x["online"]), "devices": result}
 

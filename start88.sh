@@ -1,51 +1,46 @@
 #!/bin/bash
 # start88 服務快速啟動/重啟指令
-# 版本：v0.3.3 (船標籤與生命週期手冊版)
+# 版本：v0.3.3  架構：單進程 8802（reverse proxy 指向此）
+# gps.xdove.win  → openresty → 8802（含 API + 靜態前端）
 
-PORT_API=8801
-PORT_WEB=8802
+PORT=8802
 WORKDIR="/home/hi/workspace/gpsring"
 VERSION="v0.3.3"
-TITLE="船標籤與生命週期手冊版"
+TITLE="GPS鴿環後台（單進程版）"
+
 echo "=========================================================="
-echo "      GPS 鴿環專用後台啟動工具 [start88] - Version: ${VERSION}"
-echo "      版名：「${TITLE}」"
+echo "      GPS 鴿環後台 [start88] - ${VERSION}  ${TITLE}"
 echo "=========================================================="
 
-# 1. 清理舊服務避免 Port 衝突
-echo "[*] 正在檢查並關閉佔用 Port ${PORT_API} 與 ${PORT_WEB} 的舊服務..."
-kill -9 $(lsof -t -i:${PORT_API}) 2>/dev/null || true
-kill -9 $(lsof -t -i:${PORT_WEB}) 2>/dev/null || true
+# 1. 清理舊服務
+echo "[*] 清理 Port 8801 / 8802 舊進程..."
+kill -9 $(lsof -t -i:8801) 2>/dev/null || true
+kill -9 $(lsof -t -i:8802) 2>/dev/null || true
 sleep 1
 
-# 2. 啟動 8801 API Ingestion Server (FastAPI)
-echo "[*] 啟動 8801 API 後台服務..."
+# 2. 啟動單一進程（8802）—— API + 前端合一，無記憶體隔離問題
+echo "[*] 啟動 8802 後台服務（API + Web）..."
 cd ${WORKDIR}
-nohup python3 -m uvicorn ingest_server:app --host 0.0.0.0 --port ${PORT_API} > /tmp/ingest_server_8801.log 2>&1 &
-PID_API=$!
+nohup python3 -m uvicorn ingest_server:app --host 0.0.0.0 --port ${PORT} > /tmp/ingest_server_8802.log 2>&1 &
+PID=$!
 
-# 3. 啟動 8802 Web 前端地圖與 API 整合託管服務 (雙港合一)
-echo "[*] 啟動 8802 Web 前端地圖與 API 整合託管服務 (雙港合一)..."
-nohup python3 -m uvicorn ingest_server:app --host 0.0.0.0 --port ${PORT_WEB} > /tmp/ingest_server_8802.log 2>&1 &
-PID_WEB=$!
-
-# 4. 驗證服務
+# 3. 驗證
 sleep 2
 echo "----------------------------------------------------------"
-if ps -p $PID_API > /dev/null; then
-    echo "✅ [API 8801 服務] 啟動成功！Port: ${PORT_API} (PID: ${PID_API})"
+if ps -p $PID > /dev/null; then
+    echo "✅ [8802 後台] 啟動成功 (PID: ${PID})"
 else
-    echo "❌ [API 8801 服務] 啟動失敗！請檢查 /tmp/ingest_server_8801.log"
-fi
-
-if ps -p $PID_WEB > /dev/null; then
-    echo "✅ [Web 8802 整合服務] 啟動成功！Port: ${PORT_WEB} (PID: ${PID_WEB})"
-else
-    echo "❌ [Web 8802 整合服務] 啟動失敗！請檢查 /tmp/ingest_server_8802.log"
+    echo "❌ [8802 後台] 啟動失敗，請查 /tmp/ingest_server_8802.log"
 fi
 echo "----------------------------------------------------------"
-echo "👉 您的實體測試網址與外網 SSL 反代位址："
-echo "   - 整合接口與地圖：https://gps.xdove.win/index.html"
-echo "   - API Swagger 文件：https://gps.xdove.win/docs"
-echo "   - 本地測試：http://192.168.120.218:${PORT_WEB}/index.html"
+echo "👉 端點："
+echo "   - 公網地圖：https://gps.xdove.win/index.html"
+echo "   - API Swagger：https://gps.xdove.win/docs"
+echo "   - 本地：http://192.168.120.218:8802/index.html"
+echo "   - 鴿環狀態：http://192.168.120.218:8802/api/v1/devices/status"
 echo "=========================================================="
+
+# 支援 restart 參數
+if [ "$1" = "restart" ]; then
+  echo "[restart] done"
+fi
