@@ -4,7 +4,7 @@ import logging
 import sqlite3
 import time
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Query
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +24,24 @@ app = FastAPI(title="GPS Pigeon Ring Ingestion API", version="1.1.0")
 # ── 裝置 Heartbeat 記憶體快取（輕量即時監控，不寫 DB）────────────────
 # { device_id: { "state": str, "ip": str, "fw": str, "mac": str, "ts": float, "gps_seen": bool, "gps_fixed": bool } }
 _device_heartbeats: dict = {}
+
+# ── WebSocket 廣播管理 ──────────────────────────────────────
+_ws_clients: list[WebSocket] = []
+
+async def _ws_broadcast(data: dict):
+    """廣播裝置狀態到所有連線的 WebSocket 客戶端"""
+    if not _ws_clients:
+        return
+    import json
+    msg = json.dumps(data, ensure_ascii=False)
+    dead = []
+    for ws in _ws_clients:
+        try:
+            await ws.send_text(msg)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _ws_clients.remove(ws)
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -415,8 +433,8 @@ class NfcPairPayload(BaseModel):
     action: str = "pair"  # pair | checkin | checkout
 
 @app.post("/api/v1/devices/heartbeat")
-def receive_heartbeat(payload: HeartbeatPayload):
-    """MCU 定期上報心跳 — 存入記憶體快取，含 lat/lon/factory_id"""
+async def receive_heartbeat(payload: HeartbeatPayload):
+    """MCU 定期上報心跳 — 存入記憶體快取，含 lat/lon/factory_id，並廣播 WebSocket"""
     key = payload.device_id or payload.mac
     _device_heartbeats[key] = {
         "state": payload.state,
@@ -438,6 +456,8 @@ def receive_heartbeat(payload: HeartbeatPayload):
         "ringno1": _nfc_pairings.get(key, {}).get("ringno1", ""),
     }
     logger.info(f"[HEARTBEAT] {key} state={payload.state} ip={payload.ip} lat={payload.lat} lon={payload.lon}")
+    # 即時廣播到 WebSocket 訂閱者
+    await _ws_broadcast({"type": "heartbeat", "device_id": key, **_device_heartbeats[key], "last_seen_iso": datetime.fromtimestamp(_device_heartbeats[key]["last_seen"]).strftime("%Y-%m-%d %H:%M:%S")})
     return {"status": "ok", "device_id": key}
 
 @app.post("/api/v1/devices/nfc_pair")
@@ -499,6 +519,31 @@ def get_devices_status():
     _state_order = {"racing": 0, "caring": 1, "gps_fixed": 2, "gps_searching": 3, "standby": 4, "init": 4}
     result.sort(key=lambda x: (_state_order.get(x["state"], 9) if x["online"] else 10, x["device_id"]))
     return {"total": len(result), "online": sum(1 for x in result if x["online"]), "devices": result}
+
+@app.websocket("/ws/devices")
+async def ws_devices(websocket: WebSocket):
+    """WebSocket endpoint — 訂閱後每次 heartbeat 即時推送裝置狀態"""
+    await websocket.accept()
+    _ws_clients.append(websocket)
+    try:
+        # 連線後立即推送目前全部裝置快照
+        now = time.time()
+        snapshot = []
+        for dev_id, info in _device_heartbeats.items():
+            age_sec = int(now - info["last_seen"])
+            snapshot.append({"type": "heartbeat", "device_id": dev_id, "online": age_sec < 60, "age_sec": age_sec, **info,
+                              "last_seen_iso": datetime.fromtimestamp(info["last_seen"]).strftime("%Y-%m-%d %H:%M:%S")})
+        import json
+        await websocket.send_text(json.dumps({"type": "snapshot", "devices": snapshot}, ensure_ascii=False))
+        # 保持連線，等待客戶端關閉
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if websocket in _ws_clients:
+            _ws_clients.remove(websocket)
+
 
 @app.post("/api/v1/devices/config")
 def set_device_config(payload: ConfigPayload):

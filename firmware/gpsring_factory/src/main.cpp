@@ -9,7 +9,7 @@
 #include <HTTPClient.h>
 
 #ifndef GPSRING_FIRMWARE_VERSION
-#define GPSRING_FIRMWARE_VERSION "v0.3.3"
+#define GPSRING_FIRMWARE_VERSION "v0.3.4"
 #endif
 #ifndef GPSRING_DEVICE_PREFIX
 #define GPSRING_DEVICE_PREFIX "G0703"
@@ -61,18 +61,24 @@ static const double GPS_OFFSET_DEG   = 0.0000899; // 10m 北偏
 #define LED_BUILTIN 8
 #endif
 
+// 狀態說明：
+//  STANDBY        = 電源開機/WiFi已連，等待NFC配對或上車動作
+//  GPS_SEARCHING  = 已配對，GPS搜尋中
+//  GPS_FIXED      = GPS已定位
+//  CARING         = NFC感應上車，進入護送模式（比賽中）
+//  RACING         = 正式競飛中（鴿返計時）
 enum DeviceState {
-  STATE_INIT,
+  STATE_STANDBY,        // 待機：WiFi已連，等NFC上車配對
   STATE_GPS_SEARCHING,
   STATE_GPS_FIXED,
-  STATE_CARING,
-  STATE_RACING
+  STATE_CARING,         // 上車護送（NFC感應後）
+  STATE_RACING          // 競飛中
 };
-DeviceState deviceState = STATE_INIT;
+DeviceState deviceState = STATE_STANDBY;
 
 const char* stateLabel() {
   switch (deviceState) {
-    case STATE_INIT:          return "init";
+    case STATE_STANDBY:       return "standby";
     case STATE_GPS_SEARCHING: return "gps_searching";
     case STATE_GPS_FIXED:     return "gps_fixed";
     case STATE_CARING:        return "caring";
@@ -81,16 +87,15 @@ const char* stateLabel() {
   }
 }
 
-// ── LED 閃爍邏輯 ──────────────────────────────────────────
-// 規則：有WiFi才亮；無WiFi一律滅
-// init=1閃/2s  gps_searching=2閃/2s  gps_fixed=3閃/2s
-// caring=每秒4閃，停1秒  racing=5快閃/1s
+// 非阻塞 LED 閃爍：各 state 閃爍規則（無WiFi一律滅）
+// standby=1閃/2s  gps_searching=2閃/2s  gps_fixed=3閃/2s
+// caring=每秒4閃+停1s（省電）  racing=5快閃/1s
 struct BlinkPattern { uint8_t times; uint16_t onMs; uint16_t offMs; uint16_t pauseMs; };
 static const BlinkPattern BLINK_PATTERNS[] = {
-  {1, 100, 150, 1750},  // STATE_INIT
+  {1, 100, 150, 1750},  // STATE_STANDBY
   {2, 100, 150,  900},  // STATE_GPS_SEARCHING
   {3, 100, 120,  800},  // STATE_GPS_FIXED
-  {4,  80,  80, 1000},  // STATE_CARING → 4閃+停1s（省電）
+  {4,  80,  80, 1000},  // STATE_CARING → 4閃+停1s
   {5,  80,  80,  100},  // STATE_RACING
 };
 
@@ -137,9 +142,12 @@ String lastNmea;
 bool   gpsSeen   = false;
 bool   gpsFixed  = false;
 uint32_t bootCount  = 0;
-uint32_t factoryId  = 0;   // 全域 factory_id，每燒一片自動 +1
+uint32_t factoryId  = 0;
 double   lastLat    = 0.0;
 double   lastLon    = 0.0;
+uint32_t heartbeatIntervalMs = 10000;  // 可 NVS 調整，預設 10s
+String   wifiSsid   = "";
+String   wifiPass   = "";
 
 String macCompact() {
   uint64_t mac = ESP.getEfuseMac();
@@ -259,21 +267,75 @@ void handleOtaUpload() {
   }
 }
 
+// ── 多 SSID 萬用字元連線 ───────────────────────────────────
+// 支援 prefix* 萬用字元：掃描附近 AP，依優先序嘗試匹配
+// 優先順序：NVS精確SSID > 固定SSID(build flag) > 萬用字元清單
+// 萬用字元格式：prefix|password  (prefix 不含 *)
+struct WildcardAP { const char* prefix; const char* pass; };
+static const WildcardAP WILDCARD_APS[] = {
+  {"gscc",    GPSRING_WIFI_PASS},   // gscc*（主場域）
+  {"gpsring", "2965084522053"},     // gpsring*（其他鴿環熱點）
+  {"clock",   "2965084522053"},     // clock*（鴿鐘分享熱點）
+  {nullptr, nullptr}
+};
+
+// 嘗試用萬用字元掃描連線，回傳 true=成功
+bool tryWildcardWifi() {
+  int n = WiFi.scanNetworks(false, false, false, 200);
+  if (n <= 0) { Serial.println("[GPSRing][WiFi] scan: no networks"); return false; }
+  Serial.printf("[GPSRing][WiFi] scan found %d networks\n", n);
+  // 找最強訊號且符合萬用字元的 AP
+  int bestIdx = -1; int bestRSSI = -999; const WildcardAP *bestWild = nullptr;
+  for (int i = 0; i < n; i++) {
+    String ssidFound = WiFi.SSID(i);
+    for (const WildcardAP *w = WILDCARD_APS; w->prefix; w++) {
+      if (ssidFound.startsWith(w->prefix)) {
+        if (WiFi.RSSI(i) > bestRSSI) {
+          bestRSSI = WiFi.RSSI(i); bestIdx = i; bestWild = w;
+        }
+      }
+    }
+  }
+  WiFi.scanDelete();
+  if (bestIdx < 0 || !bestWild) { Serial.println("[GPSRing][WiFi] no wildcard match"); return false; }
+  String matchedSsid = WiFi.SSID(bestIdx);
+  Serial.printf("[GPSRing][WiFi] wildcard match: %s (RSSI=%d)\n", matchedSsid.c_str(), bestRSSI);
+  WiFi.begin(matchedSsid.c_str(), bestWild->pass);
+  uint32_t t = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t < 12000) { delay(250); Serial.print('.'); }
+  Serial.println();
+  return WiFi.status() == WL_CONNECTED;
+}
+
 void setupWiFiAndOtaWeb() {
-  const char *ssid = GPSRING_WIFI_SSID;
-  const char *pass = GPSRING_WIFI_PASS;
-  if (!ssid || strlen(ssid) == 0) {
-    Serial.println("[GPSRing][WiFi] disabled: build flag GPSRING_WIFI_SSID not set");
-    return;
+  // 優先讀 NVS 中的動態 WiFi 設定（臨時熱點用）
+  // NVS key: wifi_ssid / wifi_pass（ESPConnect NVS工具可設定）
+  if (wifiSsid.length() == 0) {
+    prefs.begin("gpsring", true);
+    wifiSsid = prefs.getString("wifi_ssid", GPSRING_WIFI_SSID);
+    wifiPass = prefs.getString("wifi_pass", GPSRING_WIFI_PASS);
+    heartbeatIntervalMs = prefs.getUInt("hb_interval", 10000);
+    prefs.end();
   }
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, pass);
-  Serial.printf("[GPSRing][WiFi] connecting ssid=%s\n", ssid);
-  uint32_t start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
-    delay(250); Serial.print('.');
+
+  // 1. 嘗試精確 SSID（NVS 或 build flag）
+  if (wifiSsid.length() > 0) {
+    WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
+    Serial.printf("[GPSRing][WiFi] connecting ssid=%s\n", wifiSsid.c_str());
+    uint32_t start = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
+      delay(250); Serial.print('.');
+    }
+    Serial.println();
   }
-  Serial.println();
+
+  // 2. 若精確 SSID 失敗，嘗試萬用字元掃描
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[GPSRing][WiFi] exact SSID failed, trying wildcard scan...");
+    tryWildcardWifi();
+  }
+
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[GPSRing][WiFi] connect failed; OTA web disabled");
     return;
@@ -286,6 +348,48 @@ void setupWiFiAndOtaWeb() {
     server.send(200, "text/plain", Update.hasError() ? "OTA FAIL" : "OTA OK; rebooting");
     delay(500); ESP.restart();
   }, handleOtaUpload);
+  // NVS 設定端點（POST /config）
+  server.on("/config", HTTP_POST, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    String body = server.arg("plain");
+    // 支援 JSON: {"wifi_ssid":"xxx","wifi_pass":"yyy","hb_interval":30000}
+    // 或 form: wifi_ssid=xxx&wifi_pass=yyy&hb_interval=30000
+    auto getParam = [&](const String &key) -> String {
+      // 簡單 JSON 解析
+      int idx = body.indexOf("\"" + key + "\"");
+      if (idx >= 0) {
+        int colon = body.indexOf(":", idx);
+        if (colon >= 0) {
+          int q1 = body.indexOf("\"", colon + 1);
+          if (q1 >= 0) {
+            int q2 = body.indexOf("\"", q1 + 1);
+            if (q2 > q1) return body.substring(q1 + 1, q2);
+          }
+          // 數字
+          int end = body.indexOf(",", colon + 1);
+          if (end < 0) end = body.indexOf("}", colon + 1);
+          if (end > colon) { String v = body.substring(colon + 1, end); v.trim(); return v; }
+        }
+      }
+      return server.arg(key);
+    };
+    prefs.begin("gpsring", false);
+    String newSsid = getParam("wifi_ssid");
+    String newPass = getParam("wifi_pass");
+    String newHb   = getParam("hb_interval");
+    String resp = "{";
+    if (newSsid.length() > 0) { prefs.putString("wifi_ssid", newSsid); wifiSsid = newSsid; resp += "\"wifi_ssid\":\"" + newSsid + "\","; }
+    if (newPass.length() > 0) { prefs.putString("wifi_pass", newPass); wifiPass = newPass; resp += "\"wifi_pass\":\"***\","; }
+    if (newHb.length() > 0) {
+      uint32_t ms = (uint32_t)newHb.toInt();
+      if (ms >= 1000 && ms <= 3600000) { prefs.putUInt("hb_interval", ms); heartbeatIntervalMs = ms; }
+      resp += "\"hb_interval\":" + String(heartbeatIntervalMs) + ",";
+    }
+    prefs.end();
+    resp += "\"ok\":true}";
+    server.send(200, "application/json", resp);
+    Serial.printf("[GPSRing][Config] updated: ssid=%s hb_interval=%lu\n", wifiSsid.c_str(), (unsigned long)heartbeatIntervalMs);
+  });
   server.begin();
   Serial.println("[GPSRing][OTA] web updater ready: GET /status, POST /ota");
 }
@@ -357,12 +461,14 @@ void setup() {
                 digitalRead(TAMPER_PIN) == LOW ? "true" : "false", analogRead(BATTERY_ADC_PIN));
 
   probeGps(GPS_PROBE_MS);
-  deviceState = gpsFixed ? STATE_GPS_FIXED : (gpsSeen ? STATE_GPS_SEARCHING : STATE_INIT);
+  deviceState = gpsFixed ? STATE_GPS_FIXED : (gpsSeen ? STATE_GPS_SEARCHING : STATE_STANDBY);
   printStatusLine("[GPSRing][SMOKE]");
   Serial.println("[GPSRing] JSON_STATUS " + jsonStatus());
-  Serial.println("[GPSRing] Commands: STATUS, GPS, REBOOT, RACING, CARING");
+  Serial.println("[GPSRing] Commands: STATUS, GPS, REBOOT, CARING, RACING, STANDBY");
+  Serial.printf("[GPSRing] hb_interval=%lums (NVS key: hb_interval)\n", (unsigned long)heartbeatIntervalMs);
   setupWiFiAndOtaWeb();
-  deviceState = STATE_CARING;
+  // 開機後維持 STANDBY；NFC感應後才進入 CARING
+  // 若需測試可串口送 CARING 指令
 }
 
 void loop() {
@@ -373,12 +479,14 @@ void loop() {
     cmd.trim(); cmd.toUpperCase();
     if      (cmd == "STATUS") { Serial.println("[GPSRing] JSON_STATUS " + jsonStatus()); }
     else if (cmd == "GPS") { gpsSeen=false; gpsFixed=false; lastNmea=""; probeGps(GPS_PROBE_MS); printStatusLine("[GPSRing][GPS]"); }
-    else if (cmd == "REBOOT") { Serial.println("[GPSRing] rebooting"); delay(200); ESP.restart(); }
-    else if (cmd == "RACING") { deviceState = STATE_RACING;  Serial.println("[GPSRing] state -> racing"); }
-    else if (cmd == "CARING") { deviceState = STATE_CARING;  Serial.println("[GPSRing] state -> caring"); }
+    else if (cmd == "REBOOT")  { Serial.println("[GPSRing] rebooting"); delay(200); ESP.restart(); }
+    else if (cmd == "RACING")  { deviceState = STATE_RACING;  Serial.println("[GPSRing] state -> racing"); }
+    else if (cmd == "CARING")  { deviceState = STATE_CARING;  Serial.println("[GPSRing] state -> caring"); }
+    else if (cmd == "STANDBY") { deviceState = STATE_STANDBY; Serial.println("[GPSRing] state -> standby"); }
   }
+
   static uint32_t lastBeat = 0;
-  if (millis() - lastBeat > 10000) {
+  if (millis() - lastBeat > heartbeatIntervalMs) {
     lastBeat = millis();
     printStatusLine("[GPSRing][HEARTBEAT]");
     if (WiFi.status() == WL_CONNECTED) {

@@ -1,13 +1,53 @@
 #!/bin/bash
-# start88 服務快速啟動/重啟指令
-# 版本：v0.3.3  架構：單進程 8802（reverse proxy 指向此）
-# gps.xdove.win  → openresty → 8802（含 API + 靜態前端）
+# start88 服務快速啟動/重啟/狀態查看指令
+# 版本：v0.3.4  架構：單進程 8802（reverse proxy 指向此）
+# gps.xdove.win  → openresty → 8802（含 API + 靜態前端 + WebSocket /ws/devices）
+#
+# 用法：
+#   ./start88.sh           → 重啟服務
+#   ./start88.sh status    → 查看服務狀態
+#   ./start88.sh stop      → 停止服務
+#   ./start88.sh log       → 即時追蹤 log（Ctrl+C 退出）
+#   ./start88.sh restart   → 同 ./start88.sh（別名）
 
 PORT=8802
 WORKDIR="/home/hi/workspace/gpsring"
-VERSION="v0.3.3"
+VERSION="v0.3.4"
+LOGFILE="/tmp/ingest_server_8802.log"
 TITLE="GPS鴿環後台（單進程版）"
 
+# ── 子命令處理 ────────────────────────────────────────────
+case "$1" in
+  status)
+    echo "═══════════════ GPSRing [start88] 狀態 ═══════════════"
+    PID=$(lsof -t -i:${PORT} 2>/dev/null | head -1)
+    if [ -n "$PID" ]; then
+      echo "✅ 8802 服務運行中 (PID: $PID)"
+      echo "   上線時間: $(ps -p $PID -o etime= 2>/dev/null | tr -d ' ')"
+    else
+      echo "❌ 8802 服務未運行"
+    fi
+    echo ""
+    echo "📡 MCU 在線裝置："
+    curl -s --connect-timeout 3 http://127.0.0.1:${PORT}/api/v1/devices/status 2>/dev/null \
+      | python3 -c "import sys,json; d=json.load(sys.stdin); [print(f'  {x[\"device_id\"]} state={x[\"state\"]} fw={x[\"firmware_version\"]} online={x[\"online\"]}') for x in d['devices']]" 2>/dev/null \
+      || echo "  (服務未回應)"
+    echo "═══════════════════════════════════════════════════════"
+    exit 0
+    ;;
+  stop)
+    echo "[stop] 停止 8802..."
+    kill -9 $(lsof -t -i:${PORT}) 2>/dev/null && echo "✅ 已停止" || echo "（未在運行）"
+    exit 0
+    ;;
+  log)
+    echo "[log] 追蹤 ${LOGFILE}（Ctrl+C 退出）"
+    tail -f "${LOGFILE}"
+    exit 0
+    ;;
+esac
+
+# ── 預設：啟動/重啟 ────────────────────────────────────────
 echo "=========================================================="
 echo "      GPS 鴿環後台 [start88] - ${VERSION}  ${TITLE}"
 echo "=========================================================="
@@ -18,10 +58,10 @@ kill -9 $(lsof -t -i:8801) 2>/dev/null || true
 kill -9 $(lsof -t -i:8802) 2>/dev/null || true
 sleep 1
 
-# 2. 啟動單一進程（8802）—— API + 前端合一，無記憶體隔離問題
-echo "[*] 啟動 8802 後台服務（API + Web）..."
+# 2. 啟動單一進程（8802）—— API + 前端 + WebSocket
+echo "[*] 啟動 8802 後台服務（API + Web + WebSocket）..."
 cd ${WORKDIR}
-nohup python3 -m uvicorn ingest_server:app --host 0.0.0.0 --port ${PORT} > /tmp/ingest_server_8802.log 2>&1 &
+nohup python3 -m uvicorn ingest_server:app --host 0.0.0.0 --port ${PORT} > ${LOGFILE} 2>&1 &
 PID=$!
 
 # 3. 驗證
@@ -30,7 +70,7 @@ echo "----------------------------------------------------------"
 if ps -p $PID > /dev/null; then
     echo "✅ [8802 後台] 啟動成功 (PID: ${PID})"
 else
-    echo "❌ [8802 後台] 啟動失敗，請查 /tmp/ingest_server_8802.log"
+    echo "❌ [8802 後台] 啟動失敗，請查 ${LOGFILE}"
 fi
 echo "----------------------------------------------------------"
 echo "👉 端點："
@@ -38,9 +78,6 @@ echo "   - 公網地圖：https://gps.xdove.win/index.html"
 echo "   - API Swagger：https://gps.xdove.win/docs"
 echo "   - 本地：http://192.168.120.218:8802/index.html"
 echo "   - 鴿環狀態：http://192.168.120.218:8802/api/v1/devices/status"
+echo "   - WebSocket：ws://192.168.120.218:8802/ws/devices"
+echo "   - 日誌：${LOGFILE}"
 echo "=========================================================="
-
-# 支援 restart 參數
-if [ "$1" = "restart" ]; then
-  echo "[restart] done"
-fi

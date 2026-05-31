@@ -394,45 +394,98 @@ window.onerror = function(message, source, lineno, colno, error) {
         // ── Live GPS 鴿環圖層 ──
         const liveGpsGroup = L.layerGroup().addTo(map);
         const liveGpsMarkers = {}; // key=device_id
+        const liveGpsTracks = {}; // key=device_id → L.polyline
+        const liveGpsTrackPoints = {}; // key=device_id → [[lat,lon],...]
+        const MAX_TRACK_POINTS = 500; // 每裝置最多留 500 個軌跡點
         const LIVE_GPS_ICON = {
           standby:       "🟡", gps_searching: "🔵", gps_fixed: "🟢",
           caring:        "🟠", racing:        "🔴"
         };
+
+        function applyDeviceUpdate(dev) {
+          if (!dev.lat || !dev.lon || (dev.lat === 0 && dev.lon === 0)) return;
+          const icon = LIVE_GPS_ICON[dev.state] || "⚫";
+          const label = `${icon} ${dev.device_id.slice(-8)}<br>` +
+            `<small>${dev.ringno1 || dev.factory_id || '-'} ｜ ${dev.firmware_version}</small>`;
+          const popup = `<b>${dev.device_id}</b><br>` +
+            `狀態: ${dev.state} | 在線: ${dev.online !== false ? '✅' : '❌'}<br>` +
+            `環號: ${dev.ringno1 || '未配對'} | fid: ${dev.factory_id}<br>` +
+            `GPS: ${dev.gps_fixed ? '定位✅' : '搜尋中'} (${dev.satellites || 0}顆)<br>` +
+            `版本: ${dev.firmware_version} | IP: ${dev.ip}<br>` +
+            `最後心跳: ${dev.last_seen_iso}`;
+          if (liveGpsMarkers[dev.device_id]) {
+            liveGpsMarkers[dev.device_id].setLatLng([dev.lat, dev.lon])
+              .setPopupContent(popup).setOpacity(dev.online !== false ? 1 : 0.4);
+            // 更新圖示 emoji（state 可能改變）
+            liveGpsMarkers[dev.device_id].setIcon(
+              L.divIcon({ className:'', html:`<div style="font-size:22px;line-height:1">${icon}</div>`, iconSize:[28,28], iconAnchor:[14,14] })
+            );
+          } else {
+            const mk = L.marker([dev.lat, dev.lon], {
+              icon: L.divIcon({ className:'', html:`<div style="font-size:22px;line-height:1">${icon}</div>`, iconSize:[28,28], iconAnchor:[14,14] })
+            }).bindPopup(popup).bindTooltip(label, {permanent:false, direction:'top'});
+            liveGpsGroup.addLayer(mk);
+            liveGpsMarkers[dev.device_id] = mk;
+            mk.setOpacity(dev.online !== false ? 1 : 0.4);
+          }
+          // 軌跡點留存（只有 GPS 定位時才記錄）
+          if (dev.gps_fixed) {
+            if (!liveGpsTrackPoints[dev.device_id]) liveGpsTrackPoints[dev.device_id] = [];
+            const pts = liveGpsTrackPoints[dev.device_id];
+            pts.push([dev.lat, dev.lon]);
+            if (pts.length > MAX_TRACK_POINTS) pts.shift();
+            if (liveGpsTracks[dev.device_id]) {
+              liveGpsTracks[dev.device_id].setLatLngs(pts);
+            } else {
+              const trkColor = dev.state === 'racing' ? '#f87171' : '#34d399';
+              const trk = L.polyline(pts, { color: trkColor, weight: 2, opacity: 0.7 });
+              liveGpsGroup.addLayer(trk);
+              liveGpsTracks[dev.device_id] = trk;
+            }
+          }
+        }
+
+        // ── WebSocket 即時推送（優先）+ HTTP fallback ──────────
+        let wsConnected = false;
+        function connectWs() {
+          const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          const wsUrl = `${wsProto}//${window.location.hostname}:${window.location.port}/ws/devices`;
+          const ws = new WebSocket(wsUrl);
+          ws.onopen = () => { wsConnected = true; console.log('[GPSRing] WS connected'); };
+          ws.onmessage = (e) => {
+            try {
+              const msg = JSON.parse(e.data);
+              if (msg.type === 'snapshot') {
+                // 連線後快照：重置全部 opacity 再更新
+                Object.values(liveGpsMarkers).forEach(m => m.setOpacity(0.3));
+                for (const dev of (msg.devices || [])) applyDeviceUpdate(dev);
+              } else if (msg.type === 'heartbeat') {
+                applyDeviceUpdate(msg);
+              }
+            } catch(err) { /* ignore */ }
+          };
+          ws.onclose = () => {
+            wsConnected = false;
+            console.log('[GPSRing] WS disconnected, retry in 5s');
+            setTimeout(connectWs, 5000);
+          };
+          ws.onerror = () => ws.close();
+        }
+        connectWs();
+
+        // HTTP fallback：每 15s 刷新（補 WS 斷線空窗）
         async function refreshLiveGps() {
           try {
             const apiHost = `${window.location.protocol}//${window.location.hostname}:${window.location.port}`;
             const res = await fetch(`${apiHost}/api/v1/devices/status`);
             if (!res.ok) return;
             const data = await res.json();
-            // 先隱藏全部，再更新在線的
             Object.values(liveGpsMarkers).forEach(m => m.setOpacity(0.3));
-            for (const dev of data.devices) {
-              if (!dev.lat || !dev.lon || (dev.lat === 0 && dev.lon === 0)) continue;
-              const icon = LIVE_GPS_ICON[dev.state] || "⚫";
-              const label = `${icon} ${dev.device_id.slice(-8)}<br>` +
-                `<small>${dev.ringno1 || dev.factory_id || '-'} ｜ ${dev.firmware_version}</small>`;
-              const popup = `<b>${dev.device_id}</b><br>` +
-                `狀態: ${dev.state} | 在線: ${dev.online ? '✅' : '❌'}<br>` +
-                `環號: ${dev.ringno1 || '未配對'} | fid: ${dev.factory_id}<br>` +
-                `GPS: ${dev.gps_fixed ? '定位✅' : '搜尋中'} (${dev.satellites || 0}顆)<br>` +
-                `版本: ${dev.firmware_version} | IP: ${dev.ip}<br>` +
-                `最後心跳: ${dev.last_seen_iso}`;
-              if (liveGpsMarkers[dev.device_id]) {
-                liveGpsMarkers[dev.device_id].setLatLng([dev.lat, dev.lon])
-                  .setPopupContent(popup).setOpacity(dev.online ? 1 : 0.4);
-              } else {
-                const mk = L.marker([dev.lat, dev.lon], {
-                  icon: L.divIcon({ className:'', html:`<div style="font-size:22px;line-height:1">${icon}</div>`, iconSize:[28,28], iconAnchor:[14,14] })
-                }).bindPopup(popup).bindTooltip(label, {permanent:false, direction:'top'});
-                liveGpsGroup.addLayer(mk);
-                liveGpsMarkers[dev.device_id] = mk;
-                mk.setOpacity(dev.online ? 1 : 0.4);
-              }
-            }
+            for (const dev of data.devices) applyDeviceUpdate(dev);
           } catch(e) { /* silent */ }
         }
         refreshLiveGps();
-        setInterval(refreshLiveGps, 15000); // 15s 自動刷新
+        setInterval(refreshLiveGps, 15000); // HTTP fallback 15s
         const overlayMaps = {
             "📡 GPS鴿環即時位置": liveGpsGroup,
             "⚓ 官方放飛關卡起點": releasePointsGroup,
