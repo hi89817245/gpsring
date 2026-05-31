@@ -500,6 +500,36 @@ def list_nfc_pairs():
     return {"total": len(_nfc_pairings), "pairs": list(_nfc_pairings.values())}
 
 
+# ── factory_id 自動分配（每台新板唯一序號）─────────────────────
+_factory_id_counter: int = 0  # 將在 startup 從 DB 最大值初始化
+
+def _init_factory_counter():
+    global _factory_id_counter
+    try:
+        conn, dbtype = get_db_conn()
+        if conn is None:
+            return
+        cur = conn.cursor()
+        cur.execute("SELECT COALESCE(MAX(factory_id), 0) FROM nfc_pairings")
+        row = cur.fetchone()
+        _factory_id_counter = (row[0] if row else 0)
+        conn.close()
+    except Exception:
+        pass  # DB 未就緒時從 0 開始
+
+@app.on_event("startup")
+async def _on_startup():
+    _init_factory_counter()
+
+@app.get("/api/v1/factory/next-id")
+def get_next_factory_id():
+    """新板首次開機取得唯一 factory_id（心跳帶回後存 NVS）"""
+    global _factory_id_counter
+    _factory_id_counter += 1
+    fid = _factory_id_counter
+    return {"factory_id": fid, "offset_lat_deg": round(0.0000899 * (fid - 1), 8)}
+
+
 @app.get("/api/v1/devices/status")
 def get_devices_status():
     """即時顯示所有裝置心跳狀態，包含在線/離線判斷（>60s 無心跳 = 離線）"""

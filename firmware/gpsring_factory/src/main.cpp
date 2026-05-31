@@ -91,12 +91,13 @@ const char* stateLabel() {
 // standby=1閃/2s  gps_searching=2閃/2s  gps_fixed=3閃/2s
 // caring=每秒4閃+停1s（省電）  racing=5快閃/1s
 struct BlinkPattern { uint8_t times; uint16_t onMs; uint16_t offMs; uint16_t pauseMs; };
+// onMs 加長至 300ms 以便肉眼區分閃爍次數
 static const BlinkPattern BLINK_PATTERNS[] = {
-  {1, 100, 150, 1750},  // STATE_STANDBY
-  {2, 100, 150,  900},  // STATE_GPS_SEARCHING
-  {3, 100, 120,  800},  // STATE_GPS_FIXED
-  {4,  80,  80, 1000},  // STATE_CARING → 4閃+停1s
-  {5,  80,  80,  100},  // STATE_RACING
+  {1, 300, 200, 1500},  // STATE_STANDBY       → 1閃/2s
+  {2, 300, 200,  700},  // STATE_GPS_SEARCHING  → 2閃/2s
+  {3, 300, 180,  560},  // STATE_GPS_FIXED      → 3閃/2s
+  {4, 200, 150, 1000},  // STATE_CARING         → 4閃+停1s
+  {5, 150, 100,  100},  // STATE_RACING         → 5快閃/1s
 };
 
 static uint32_t ledLastMs   = 0;
@@ -196,7 +197,9 @@ String jsonStatus() {
   json += "\"flash_size\":" + String(ESP.getFlashChipSize()) + ",";
   json += "\"littlefs_total\":" + String(LittleFS.totalBytes()) + ",";
   json += "\"littlefs_used\":" + String(LittleFS.usedBytes()) + ",";
-  json += "\"ota_partition\":\"" + String(running ? running->label : "unknown") + "\"";
+  json += "\"ota_partition\":\"" + String(running ? running->label : "unknown") + "\",";
+  json += "\"hb_interval_ms\":" + String(heartbeatIntervalMs) + ",";
+  json += "\"wifi_ssid\":\"" + wifiSsid + "\"";
   json += "}";
   return json;
 }
@@ -241,12 +244,66 @@ void probeGps(uint32_t timeoutMs) {
 }
 
 void handleRoot() {
-  String html = "<html><body style='font-family:sans-serif'>";
-  html += "<h1>GPSRing Factory " GPSRING_FIRMWARE_VERSION "</h1>";
-  html += "<pre>" + jsonStatus() + "</pre>";
-  html += "<form method='POST' action='/ota' enctype='multipart/form-data'>";
-  html += "<input type='file' name='firmware'><button>OTA update</button></form>";
-  html += "</body></html>";
+  // ── 手機友善的 Web 設定頁 ──
+  String ip = WiFi.localIP().toString();
+  String html = R"rawhtml(<!DOCTYPE html>
+<html lang='zh-Hant'><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>GPSRing 設定</title>
+<style>
+body{font-family:sans-serif;background:#111;color:#eee;margin:0;padding:16px}
+h2{color:#4af}
+.card{background:#1e1e2e;border-radius:8px;padding:16px;margin:12px 0}
+label{display:block;margin:8px 0 4px;font-size:0.9em;color:#aaa}
+input,select{width:100%;padding:8px;border:1px solid #444;border-radius:6px;background:#2a2a3e;color:#eee;box-sizing:border-box}
+button{margin-top:12px;padding:10px 24px;background:#4af;color:#111;font-weight:bold;border:none;border-radius:6px;cursor:pointer;font-size:1em}
+#msg{margin-top:8px;color:#4f4;font-weight:bold}
+pre{font-size:0.8em;overflow:auto;background:#0d0d1a;padding:8px;border-radius:6px}
+</style></head><body>
+<h2>🐦 GPSRing 設定 )rawhtml";
+  html += GPSRING_FIRMWARE_VERSION;
+  html += R"rawhtml(</h2>
+<div class='card'>
+<b>裝置狀態</b>
+<pre id='st'></pre>
+</div>
+<div class='card'>
+<b>WiFi / 心跳設定</b>
+<form id='cfg'>
+<label>WiFi SSID</label><input id='s' type='text' placeholder='留空=萬用字元自動'>
+<label>WiFi 密碼</label><input id='p' type='password' placeholder='留空不修改'>
+<label>心跳間隔 (ms, 5000~60000)</label><input id='h' type='number' min='5000' max='60000' step='1000' value='10000'>
+<button type='button' onclick='save()'>儲存並套用</button>
+<div id='msg'></div>
+</form>
+</div>
+<div class='card'>
+<b>OTA 韌體更新</b>
+<form method='POST' action='/ota' enctype='multipart/form-data'>
+<input type='file' name='firmware' accept='.bin'>
+<button>上傳更新</button>
+</form>
+</div>
+<script>
+async function loadStatus(){
+  try{const r=await fetch('/status');const j=await r.json();
+  document.getElementById('st').textContent=JSON.stringify(j,null,2);
+  document.getElementById('h').value=j.hb_interval_ms||10000;
+  }catch(e){}
+}
+async function save(){
+  const body={};
+  const s=document.getElementById('s').value.trim();
+  const p=document.getElementById('p').value.trim();
+  const h=parseInt(document.getElementById('h').value)||10000;
+  if(s)body.wifi_ssid=s; if(p)body.wifi_pass=p; body.hb_interval=h;
+  const r=await fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();
+  document.getElementById('msg').textContent=j.ok?'✅ 已儲存':'❌ 失敗';
+  setTimeout(loadStatus,1000);
+}
+loadStatus(); setInterval(loadStatus,10000);
+</script></body></html>)rawhtml";
   server.send(200, "text/html", html);
 }
 void handleStatus() {
@@ -413,9 +470,24 @@ void setup() {
   // factory_id 只要存在就沿用；若 NVS 全空（新板）才 +1
   factoryId = prefs.getUInt("factory_id", 0);
   if (factoryId == 0) {
-    // 透過後台取得下一個 factory_id（簡化：本機累加，可後台分配）
-    // 此處用 NVS counter：每個新板首次燒錄自動累加
-    factoryId = 1;  // 預設從1開始；可透過 NVS 工具手動設定
+    // 向後台取得唯一 factory_id（確保多板不重疊）
+    if (WiFi.status() == WL_CONNECTED) {
+      HTTPClient http;
+      String url = "http://" GPSRING_OTA_HOST ":" + String(GPSRING_OTA_PORT) + "/api/v1/factory/next-id";
+      http.begin(url);
+      int code = http.GET();
+      if (code == 200) {
+        String body = http.getString();
+        // 簡單解析 {"factory_id":N,...}
+        int idx = body.indexOf("\"factory_id\":");
+        if (idx >= 0) {
+          factoryId = body.substring(idx + 13).toInt();
+        }
+      }
+      http.end();
+      Serial.printf("[GPSRing] factory_id from server=%lu (http=%d)\n", (unsigned long)factoryId, code);
+    }
+    if (factoryId == 0) factoryId = 1;  // 離線 fallback
     prefs.putUInt("factory_id", factoryId);
   }
 
