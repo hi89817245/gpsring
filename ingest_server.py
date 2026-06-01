@@ -457,7 +457,7 @@ class NfcPairPayload(BaseModel):
 @app.post("/api/v1/devices/heartbeat")
 async def receive_heartbeat(payload: HeartbeatPayload):
     """MCU 定期上報心跳 — 存入記憶體快取，含 lat/lon/factory_id，並廣播 WebSocket"""
-    key = payload.device_id or payload.mac
+    key = payload.mac or payload.device_id
     _device_heartbeats[key] = {
         "state": payload.state,
         "firmware_version": payload.firmware_version,
@@ -489,7 +489,7 @@ def nfc_pair(payload: NfcPairPayload):
     action=checkin → 上車感應，觸發後台通知 MCU 切換 CARING（未來擴充）
     action=checkout→ 鴿返，解除 caring 狀態
     """
-    key = payload.device_id or payload.mac
+    key = payload.mac or payload.device_id
     if not key:
         raise HTTPException(status_code=400, detail="device_id or mac required")
     now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

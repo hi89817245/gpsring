@@ -1,12 +1,17 @@
 {
-  "name": "RingOps GPSRing Factory",
-  "version": "v0.3.6",
-  "new_install_prompt_erase": true,
+  "name": "GPSRing",
+  "version": "0.3.7",
+  "home_assistant_domain": "esphome",
+  "funding_url": "https://gps.xdove.win",
+  "new_install_prompt_erase": false,
   "builds": [
     {
       "chipFamily": "ESP32-C3",
       "parts": [
-        { "path": "gpsring-v0.3.6-merged-esp32c3.bin", "offset": 0 }
+        {
+          "path": "gpsring-v0.3.7-merged-esp32c3.bin",
+          "offset": 0
+        }
       ]
     }
   ]

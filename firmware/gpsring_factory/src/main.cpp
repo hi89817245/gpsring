@@ -9,7 +9,7 @@
 #include <HTTPClient.h>
 
 #ifndef GPSRING_FIRMWARE_VERSION
-#define GPSRING_FIRMWARE_VERSION "v0.3.6"
+#define GPSRING_FIRMWARE_VERSION "v0.3.7"
 #endif
 #ifndef GPSRING_DEVICE_PREFIX
 #define GPSRING_DEVICE_PREFIX "G0703"
@@ -260,40 +260,83 @@ h2{color:#4af}
 .card{background:#1e1e2e;border-radius:8px;padding:16px;margin:12px 0}
 label{display:block;margin:8px 0 4px;font-size:0.9em;color:#aaa}
 input,select{width:100%;padding:8px;border:1px solid #444;border-radius:6px;background:#2a2a3e;color:#eee;box-sizing:border-box}
-button{margin-top:12px;padding:10px 24px;background:#4af;color:#111;font-weight:bold;border:none;border-radius:6px;cursor:pointer;font-size:1em}
-#msg{margin-top:8px;color:#4f4;font-weight:bold}
-pre{font-size:0.8em;overflow:auto;background:#0d0d1a;padding:8px;border-radius:6px}
+.row{display:flex;gap:8px;margin-top:12px}
+button{flex:1;padding:10px 12px;background:#4af;color:#111;font-weight:bold;border:none;border-radius:6px;cursor:pointer;font-size:.95em}
+button.red{background:#f44}
+button.grn{background:#4a4}
+button.yel{background:#fa3;color:#111}
+#msg{margin-top:8px;color:#4f4;font-weight:bold;font-size:.9em}
+pre{font-size:0.78em;overflow:auto;background:#0d0d1a;padding:8px;border-radius:6px;max-height:220px}
+.tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.8em;background:#333;margin:2px}
+.tag.ok{background:#1a3a1a;color:#4f4}
 </style></head><body>
 <h2>🐦 GPSRing 設定 )rawhtml";
   html += GPSRING_FIRMWARE_VERSION;
   html += R"rawhtml(</h2>
 <div class='card'>
 <b>裝置狀態</b>
+<div id='tags'></div>
 <pre id='st'></pre>
 </div>
 <div class='card'>
-<b>WiFi / 心跳設定</b>
-<form id='cfg'>
+<b>🔢 Factory ID / 腳環設定</b>
+<label>Factory ID (1~99999)</label><input id='fid' type='number' min='1' max='99999' placeholder='留空不修改'>
+<label>腳環號 ringno1</label><input id='rno' type='text' placeholder='例: A12345'>
+<label>備註 note</label><input id='note2' type='text' placeholder='選填'>
+<div class='row'>
+<button type='button' onclick='saveFid()'>💾 儲存FID+腳環</button>
+<button type='button' class='red' onclick='clearNvs()'>🗑 清除NVS(重置)</button>
+</div>
+<div id='msg2'></div>
+</div>
+<div class='card'>
+<b>📶 WiFi / 心跳設定</b>
 <label>WiFi SSID</label><input id='s' type='text' placeholder='留空=萬用字元自動'>
 <label>WiFi 密碼</label><input id='p' type='password' placeholder='留空不修改'>
 <label>心跳間隔 (ms, 5000~60000)</label><input id='h' type='number' min='5000' max='60000' step='1000' value='10000'>
-<button type='button' onclick='save()'>儲存並套用</button>
+<div class='row'>
+<button type='button' onclick='save()'>💾 儲存並套用</button>
+<button type='button' onclick='reboot()' class='yel'>🔄 重啟</button>
+</div>
 <div id='msg'></div>
-</form>
 </div>
 <div class='card'>
-<b>OTA 韌體更新</b>
+<b>💡 LED 測試 (GPIO8 active-LOW)</b>
+<div class='row'>
+<button type='button' class='grn' onclick='sendSerial("STANDBY")'>待機閃</button>
+<button type='button' onclick='sendSerial("CARING")'>護送閃</button>
+<button type='button' class='red' onclick='sendSerial("RACING")'>競飛閃</button>
+</div>
+<div class='row'>
+<button type='button' onclick='ledOn()'>🔵 常亮</button>
+<button type='button' onclick='ledOff()'>⚫ 滅燈</button>
+<button type='button' onclick='sendSerial("STATUS")'>📋 STATUS</button>
+</div>
+<pre id='ledlog' style='max-height:80px'>-- LED log --</pre>
+</div>
+<div class='card'>
+<b>📡 OTA 韌體更新</b>
 <form method='POST' action='/ota' enctype='multipart/form-data'>
 <input type='file' name='firmware' accept='.bin'>
-<button>上傳更新</button>
+<button style='margin-top:8px'>⬆ 上傳更新</button>
 </form>
 </div>
 <script>
+let curFid=0;
 async function loadStatus(){
-  try{const r=await fetch('/status');const j=await r.json();
-  document.getElementById('st').textContent=JSON.stringify(j,null,2);
-  document.getElementById('h').value=j.hb_interval_ms||10000;
-  }catch(e){}
+  try{
+    const r=await fetch('/status');const j=await r.json();
+    document.getElementById('st').textContent=JSON.stringify(j,null,2);
+    document.getElementById('h').value=j.hb_interval_ms||10000;
+    curFid=j.factory_id||0;
+    if(!document.getElementById('fid').value) document.getElementById('fid').placeholder='目前: '+curFid;
+    if(!document.getElementById('rno').value) document.getElementById('rno').placeholder=j.ringno1||'未設定';
+    const tags=document.getElementById('tags');
+    tags.innerHTML='<span class="tag">FID: <b>'+j.factory_id+'</b></span>'
+      +'<span class="tag">MAC: '+j.mac+'</span>'
+      +'<span class="tag '+(j.gps_fixed?'ok':'')+'">GPS: '+(j.gps_fixed?'✅已定位':'❌未定位')+'</span>'
+      +'<span class="tag">State: '+j.state+'</span>';
+  }catch(e){document.getElementById('st').textContent='連線失敗 '+e;}
 }
 async function save(){
   const body={};
@@ -303,10 +346,48 @@ async function save(){
   if(s)body.wifi_ssid=s; if(p)body.wifi_pass=p; body.hb_interval=h;
   const r=await fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();
-  document.getElementById('msg').textContent=j.ok?'✅ 已儲存':'❌ 失敗';
-  setTimeout(loadStatus,1000);
+  document.getElementById('msg').textContent=j.ok?'✅ WiFi/心跳已儲存':'❌ 失敗';
+  setTimeout(loadStatus,1200);
 }
-loadStatus(); setInterval(loadStatus,10000);
+async function saveFid(){
+  const fv=document.getElementById('fid').value.trim();
+  const rno=document.getElementById('rno').value.trim();
+  const note=document.getElementById('note2').value.trim();
+  const body={};
+  if(fv)body.factory_id=parseInt(fv);
+  if(rno)body.ringno1=rno;
+  if(note)body.note=note;
+  const r=await fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();
+  document.getElementById('msg2').textContent=j.ok?'✅ FID/腳環已儲存':'❌ 失敗: '+JSON.stringify(j);
+  setTimeout(loadStatus,1200);
+}
+async function clearNvs(){
+  if(!confirm('確定清除 NVS？裝置將重置並重啟！'))return;
+  await fetch('/cmd',{method:'POST',body:'CLEAR_NVS'});
+  document.getElementById('msg2').textContent='⚠ NVS 已清除，重啟中…';
+}
+async function reboot(){
+  if(!confirm('確定重啟？'))return;
+  await fetch('/cmd',{method:'POST',body:'REBOOT'});
+  document.getElementById('msg').textContent='🔄 重啟中…';
+}
+async function sendSerial(cmd){
+  try{
+    const r=await fetch('/cmd',{method:'POST',body:cmd});
+    const t=await r.text();
+    document.getElementById('ledlog').textContent+='\n> '+cmd+' => '+t;
+  }catch(e){document.getElementById('ledlog').textContent+='\n[ERR] '+e;}
+}
+async function ledOn(){
+  await fetch('/led?v=1');
+  document.getElementById('ledlog').textContent+='\n> LED ON (常亮)';
+}
+async function ledOff(){
+  await fetch('/led?v=0');
+  document.getElementById('ledlog').textContent+='\n> LED OFF (滅)';
+}
+loadStatus(); setInterval(loadStatus,8000);
 </script></body></html>)rawhtml";
   server.send(200, "text/html", html);
 }
@@ -448,10 +529,48 @@ void setupWiFiAndOtaWeb() {
       if (ms >= 1000 && ms <= 3600000) { prefs.putUInt("hb_interval", ms); heartbeatIntervalMs = ms; }
       resp += "\"hb_interval\":" + String(heartbeatIntervalMs) + ",";
     }
+    // factory_id / ringno1 / note 設定
+    String newFid   = getParam("factory_id");
+    String newRno   = getParam("ringno1");
+    String newNote  = getParam("note");
+    if (newFid.length() > 0) {
+      uint32_t fid = (uint32_t)newFid.toInt();
+      if (fid >= 1 && fid <= 99999) { prefs.putUInt("factory_id", fid); factoryId = fid; resp += "\"factory_id\":" + String(fid) + ","; }
+    }
+    if (newRno.length() > 0)  { prefs.putString("ringno1", newRno);  ringno1   = newRno;   resp += "\"ringno1\":\"" + newRno + "\","; }
+    if (newNote.length() > 0) { prefs.putString("note", newNote);     noteText  = newNote;  resp += "\"note\":\"" + newNote + "\","; }
     prefs.end();
     resp += "\"ok\":true}";
     server.send(200, "application/json", resp);
-    Serial.printf("[GPSRing][Config] updated: ssid=%s hb_interval=%lu\n", wifiSsid.c_str(), (unsigned long)heartbeatIntervalMs);
+    Serial.printf("[GPSRing][Config] updated: ssid=%s hb_interval=%lu fid=%lu\n", wifiSsid.c_str(), (unsigned long)heartbeatIntervalMs, (unsigned long)factoryId);
+  });
+  // /cmd — 接受串列指令（供 Web UI LED 測試、REBOOT、CLEAR_NVS 等）
+  server.on("/cmd", HTTP_POST, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    String cmd = server.arg("plain");
+    cmd.trim();
+    String upper = cmd;
+    upper.toUpperCase();
+    String resp = "ok";
+    if (upper == "REBOOT") { server.send(200, "text/plain", "rebooting"); delay(400); ESP.restart(); return; }
+    else if (upper == "CLEAR_NVS") {
+      prefs.begin("gpsring", false); prefs.clear(); prefs.end();
+      server.send(200, "text/plain", "NVS cleared; rebooting"); delay(400); ESP.restart(); return;
+    }
+    else if (upper == "CARING")  { deviceState = STATE_CARING;  resp = "state->caring"; }
+    else if (upper == "RACING")  { deviceState = STATE_RACING;  resp = "state->racing"; }
+    else if (upper == "STANDBY") { deviceState = STATE_STANDBY; resp = "state->standby"; }
+    else if (upper == "STATUS")  { resp = jsonStatus(); }
+    else { resp = "unknown cmd: " + cmd; }
+    server.send(200, "text/plain", resp);
+  });
+  // /led — 直接控制 LED（測試 active-LOW）
+  server.on("/led", HTTP_GET, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    String v = server.arg("v");
+    if (v == "1")      { digitalWrite(LED_BUILTIN, LOW);  server.send(200, "text/plain", "LED ON"); }
+    else if (v == "0") { digitalWrite(LED_BUILTIN, HIGH); server.send(200, "text/plain", "LED OFF"); }
+    else { server.send(400, "text/plain", "use ?v=0 or ?v=1"); }
   });
   server.begin();
   Serial.println("[GPSRing][OTA] web updater ready: GET /status, POST /ota");
