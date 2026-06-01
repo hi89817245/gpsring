@@ -9,7 +9,7 @@
 #include <HTTPClient.h>
 
 #ifndef GPSRING_FIRMWARE_VERSION
-#define GPSRING_FIRMWARE_VERSION "v0.3.7"
+#define GPSRING_FIRMWARE_VERSION "v0.3.8"
 #endif
 #ifndef GPSRING_DEVICE_PREFIX
 #define GPSRING_DEVICE_PREFIX "G0703"
@@ -42,7 +42,7 @@
 #define GPSRING_OTA_HOST "192.168.120.218"
 #endif
 #ifndef GPSRING_OTA_PORT
-#define GPSRING_OTA_PORT 8801
+#define GPSRING_OTA_PORT 8802
 #endif
 
 static const uint32_t SERIAL_BAUD  = 115200;
@@ -60,6 +60,14 @@ static const double GPS_OFFSET_DEG   = 0.0000899; // 10m 北偏
 #ifndef LED_BUILTIN
 #define LED_BUILTIN 8
 #endif
+// LED 極性：1 = active-LOW（低電平亮，多數 ESP32-C3 內建藍燈）
+//           0 = active-HIGH（高電平亮，部分外接 LED 板）
+// 若燈一直亮無法滅，改為 0
+#ifndef LED_ACTIVE_LOW
+#define LED_ACTIVE_LOW 1
+#endif
+#define LED_ON  (LED_ACTIVE_LOW ? LOW  : HIGH)
+#define LED_OFF (LED_ACTIVE_LOW ? HIGH : LOW)
 
 // 狀態說明：
 //  STANDBY        = 電源開機/WiFi已連，等待NFC配對或上車動作
@@ -107,7 +115,7 @@ static bool     ledPhaseOn  = false;
 void updateLed() {
   // 無WiFi → LED 全滅
   if (WiFi.status() != WL_CONNECTED) {
-    digitalWrite(LED_BUILTIN, HIGH);
+    digitalWrite(LED_BUILTIN, LED_OFF);
     return;
   }
   const BlinkPattern &p = BLINK_PATTERNS[deviceState];
@@ -120,7 +128,7 @@ void updateLed() {
       ledLastMs = now;
       if (ledBlinkIdx < p.times) {
         ledPhaseOn = true;
-        digitalWrite(LED_BUILTIN, LOW);   // 亮
+        digitalWrite(LED_BUILTIN, LED_ON);   // 亮
       } else {
         ledBlinkIdx = 0;
       }
@@ -130,7 +138,7 @@ void updateLed() {
       ledLastMs  = now;
       ledPhaseOn = false;
       ledBlinkIdx++;
-      digitalWrite(LED_BUILTIN, HIGH);  // 滅
+      digitalWrite(LED_BUILTIN, LED_OFF);  // 滅
     }
   }
 }
@@ -170,9 +178,19 @@ String buildHash() {
 }
 
 // ── 預設座標（龜山島 + factory_id 偏移）──────────────────
+// 模擬飛行偏移（racing 時每次 heartbeat 往東移動 ~5m）
+static double simLon_offset = 0.0;
+
 void getDefaultCoord(double &lat, double &lon) {
   lat = GPS_DEFAULT_LAT + GPS_OFFSET_DEG * (factoryId > 0 ? factoryId - 1 : 0);
-  lon = GPS_DEFAULT_LON;
+  if (deviceState == STATE_RACING) {
+    // racing 模式：每次呼叫往東偏移 ~5m（0.0000449°），最多 200 步後重置
+    simLon_offset += 0.0000449;
+    if (simLon_offset > 200 * 0.0000449) simLon_offset = 0.0;
+  } else {
+    simLon_offset = 0.0; // 非 racing 重置
+  }
+  lon = GPS_DEFAULT_LON + simLon_offset;
 }
 
 String jsonStatus() {
@@ -568,8 +586,8 @@ void setupWiFiAndOtaWeb() {
   server.on("/led", HTTP_GET, []() {
     server.sendHeader("Access-Control-Allow-Origin", "*");
     String v = server.arg("v");
-    if (v == "1")      { digitalWrite(LED_BUILTIN, LOW);  server.send(200, "text/plain", "LED ON"); }
-    else if (v == "0") { digitalWrite(LED_BUILTIN, HIGH); server.send(200, "text/plain", "LED OFF"); }
+    if (v == "1")      { digitalWrite(LED_BUILTIN, LED_ON);  server.send(200, "text/plain", "LED ON"); }
+    else if (v == "0") { digitalWrite(LED_BUILTIN, LED_OFF); server.send(200, "text/plain", "LED OFF"); }
     else { server.send(400, "text/plain", "use ?v=0 or ?v=1"); }
   });
   server.begin();
@@ -584,7 +602,7 @@ void setup() {
 
   pinMode(GPS_POWER_PIN, OUTPUT); digitalWrite(GPS_POWER_PIN, HIGH);
   pinMode(TAMPER_PIN, INPUT_PULLUP);
-  pinMode(LED_BUILTIN, OUTPUT);   digitalWrite(LED_BUILTIN, HIGH); // 初始滅
+  pinMode(LED_BUILTIN, OUTPUT);   digitalWrite(LED_BUILTIN, LED_OFF); // 初始滅
   analogReadResolution(12);
 
   prefs.begin("gpsring", false);

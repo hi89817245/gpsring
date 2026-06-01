@@ -1,6 +1,6 @@
 #!/bin/bash
 # start88 服務快速啟動/重啟/狀態查看指令
-# 版本：v0.3.7  架構：單進程 8802（reverse proxy 指向此）
+# 版本：v0.3.8  架構：單進程 8802（reverse proxy 指向此）
 # gps.xdove.win  → openresty → 8802（含 API + 靜態前端 + WebSocket /ws/devices）
 #
 # 用法：
@@ -15,10 +15,10 @@
 
 PORT=8802
 WORKDIR="/home/hi/workspace/gpsring"
-VERSION="v0.3.7"
+VERSION="v0.3.8"
 LOGFILE="/tmp/ingest_server_8802.log"
 TITLE="GPS鴿環後台（單進程版）"
-LATEST_FW="${WORKDIR}/firmware/gpsring-v0.3.7-esp32c3.bin"
+LATEST_FW="${WORKDIR}/firmware/gpsring-v0.3.8-esp32c3.bin"
 
 # ── 子命令處理 ────────────────────────────────────────────
 case "$1" in
