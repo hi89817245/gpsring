@@ -2,9 +2,9 @@
 
 > **For Hermes:** Use `gps-ring-development`, `writing-plans`, and `subagent-driven-development` before implementing this blueprint.
 
-**文件版本:** v0.3.0-blueprint  
-**最後更新:** 2026-05-24 10:29 CST  
-**目前實作基準:** v0.2.1「真實防弊沙盤 - 上傳抽稀修正版」  
+**文件版本:** v0.3.7-blueprint  
+**最後更新:** 2026-06-01 CST  
+**目前實作基準:** v0.3.7「MCU WebUI全參數、LED測試、OTA公網、HA修復」  
 **目標:** 從展示型 GPS 沙盤升級為可供鴿會快速定位作弊/擄鴿熱點的實務防弊平台。
 
 ---
@@ -411,13 +411,46 @@ v0.3.3：segment event 與賽程鑑識報告版
 
 ### 8.1 明確待辦（不要只寫在討論裡）
 
-- [ ] 取得/建立第一版 OTA-enabled factory firmware package：source、build config、bootloader、partition table、factory `.bin`、OTA `.bin`、offset、sha256。
-- [ ] 將第一版 `.bin` 用 `scripts/publish_firmware.sh` 發布到 `/share/esp32`，驗證 LAN 與 public URL 可下載。
-- [ ] 單片非 OLED 板 USB factory smoke test：serial 輸出 `firmware_version/build_hash/state=init`。
-- [ ] OTA 小版本測試：從 `v0.3.3-factory` 升到 `v0.3.4-ota-test`，驗證版本變更與 rollback/fail-safe。
+- [x] 取得/建立第一版 OTA-enabled factory firmware package：source、build config、bootloader、partition table、factory `.bin`、OTA `.bin`、offset、sha256。
+- [x] 將第一版 `.bin` 用 `scripts/publish_firmware.sh` 發布到 `/share/esp32`，驗證 LAN 與 public URL 可下載。
+- [x] 單片非 OLED 板 USB factory smoke test：serial 輸出 `firmware_version/build_hash/state=init`。
+- [x] OTA 小版本測試：從 v0.3.6 升到 v0.3.7，驗證版本變更成功（120.82 已驗證）。
+- [x] MCU Web UI 全參數設定：FID、ringno1、note、WiFi、心跳，含 LED 測試與 CLEAR_NVS。
+- [x] 後台 MAC-first device key：避免兩板 device_id 碰撞，同時在線可正確識別。
 - [ ] GP-02 實機 GPS 測試：室外固定、NMEA `$GNRMC/$GNGGA`、satellites、HDOP、冷/熱啟時間。
+- [ ] 批次燒錄 SOP：9 片依序插 ttyACM0，自動取 factory_id 2~9，腳環號 A0001~A0009。
+- [ ] 多板上線後驗證 factory_id ≥2 座標偏移是否正確顯示在地圖。
 - [ ] 實作 `POST /api/v1/tracks/upload/batch`：支援 gzip JSON/CSV，快速回 `202 + job_id`。
 - [ ] 建立 background worker/job store：解析、寫 raw points、跑 segment/event 防弊分析、回報 job status。
 - [ ] 壓測腳本 Phase A：n=100 / 1 分鐘集中上傳，測 300s 採樣與 10s 高頻兩種 payload。
 - [ ] 壓測腳本 Phase B：n=500 / 10 分鐘集中上傳，觀察 p95 latency、CPU/RAM/I/O/SQLite/DB lock。
+
+## 9. 2026-06-01 硬體到貨後系統整合狀態（v0.3.7）
+
+### Phase 1：完成（單板 USB + OTA + Web UI）
+- ✅ ESP32-C3 factory flash via `esptool`（USB, `/dev/ttyACM0`）
+- ✅ OTA endpoint `POST /ota`（HTTP multipart, 已驗證 120.82 v0.3.7）
+- ✅ MCU Web UI（`http://<MCU_IP>/`）：FID、ringno1、note、WiFi、心跳、LED 測試、/cmd、/led
+- ✅ 後台 `gps.xdove.win:8802`：heartbeat、裝置清單、WebSocket、/otg RingOps
+- ✅ 公網 OTA：`https://gps.xdove.win/firmware/` 可直接從 MCU 拉取
+- ✅ HA `ha.xdove.win` 反代修復（trusted_proxies 加入 192.168.11.224）
+
+### Phase 2：進行中（多板批次 + GPS 驗證）
+- 🔲 批次燒錄 9 片（factory_id 2~9），腳環號 A0001~A0009
+- 🔲 多板 heartbeat 同時在線，各自獨立座標偏移
+- 🔲 GP-02 接線 + 室外 GPS 定位（gps_fixed=true）
+- 🔲 RingOps 歸返上傳功能（充電觸發 + 手動上傳 + 電量顯示）
+
+### 關鍵技術規格（v0.3.7）
+| 項目 | 值 |
+|---|---|
+| 韌體版本 | v0.3.7 |
+| 後台 DB | SQLite（`gpsring_local.db`），可選 PostgreSQL |
+| 裝置識別 key | MAC（優先）→ device_id（fallback） |
+| FID 偏移公式 | lat += (FID-1) × 0.0000899° |
+| 龜山島基準座標 | lat=24.845, lon=121.9333 |
+| LED GPIO | GPIO 8，active-LOW |
+| OTA 端點 | `POST http://<MCU_IP>/ota`（multipart） |
+| 公網韌體 URL | `https://gps.xdove.win/firmware/<file>.bin` |
+
 - [ ] UI/後台看板：上傳 job 狀態、partial/resume、失敗重試、設備上傳完成率。
