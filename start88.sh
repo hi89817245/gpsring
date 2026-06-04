@@ -1,7 +1,7 @@
 #!/bin/bash
 # start88 服務快速啟動/重啟/狀態查看指令
-# 版本：v0.3.8  架構：單進程 8802（reverse proxy 指向此）
-# gps.xdove.win  → openresty → 8802（含 API + 靜態前端 + WebSocket /ws/devices）
+# 版本：v0.3.8  架構：單進程 8801（reverse proxy 指向此）
+# gps.xdove.win  → openresty → 8801（含 API + 靜態前端 + WebSocket /ws/devices）
 #
 # 用法：
 #   ./start88.sh           → 重啟服務
@@ -13,10 +13,10 @@
 #   ./start88.sh mcu <ip>  → 查詢指定 MCU /status
 #   ./start88.sh ota <ip>  → OTA 推送最新 v0.3.7 韌體到指定 MCU
 
-PORT=8802
+PORT=8801
 WORKDIR="/home/hi/workspace/gpsring"
 VERSION="v0.3.8"
-LOGFILE="/tmp/ingest_server_8802.log"
+LOGFILE="/tmp/ingest_server_8801.log"
 TITLE="GPS鴿環後台（單進程版）"
 LATEST_FW="${WORKDIR}/firmware/gpsring-v0.3.8-esp32c3.bin"
 
@@ -26,10 +26,10 @@ case "$1" in
     echo "═══════════════ GPSRing [start88] 狀態 ═══════════════"
     PID=$(lsof -t -i:${PORT} 2>/dev/null | head -1)
     if [ -n "$PID" ]; then
-      echo "✅ 8802 服務運行中 (PID: $PID)"
+      echo "✅ 8801 服務運行中 (PID: $PID)"
       echo "   上線時間: $(ps -p $PID -o etime= 2>/dev/null | tr -d ' ')"
     else
-      echo "❌ 8802 服務未運行"
+      echo "❌ 8801 服務未運行"
     fi
     echo ""
     echo "📡 MCU 在線裝置："
@@ -40,12 +40,12 @@ case "$1" in
     echo "🌐 端點："
     echo "   公網地圖: https://gps.xdove.win/"
     echo "   RingOps: https://gps.xdove.win/otg"
-    echo "   本地 8802: http://192.168.120.218:8802/"
+    echo "   本地 8801: http://192.168.120.218:8801/"
     echo "═══════════════════════════════════════════════════════"
     exit 0
     ;;
   stop)
-    echo "[stop] 停止 8802..."
+    echo "[stop] 停止 8801..."
     kill -9 $(lsof -t -i:${PORT}) 2>/dev/null && echo "✅ 已停止" || echo "（未在運行）"
     exit 0
     ;;
@@ -56,7 +56,7 @@ case "$1" in
     ;;
   otg)
     echo "🕊️ RingOps 鴿環作業站："
-    echo "   本地: http://192.168.120.218:8802/otg"
+    echo "   本地: http://192.168.120.218:8801/otg"
     echo "   公網: https://gps.xdove.win/otg"
     exit 0
     ;;
@@ -84,11 +84,10 @@ echo "=========================================================="
 # 1. 清理舊服務
 echo "[*] 清理 Port 8801 / 8802 舊進程..."
 kill -9 $(lsof -t -i:8801) 2>/dev/null || true
-kill -9 $(lsof -t -i:8802) 2>/dev/null || true
 sleep 1
 
-# 2. 啟動單一進程（8802）—— API + 前端 + WebSocket
-echo "[*] 啟動 8802 後台服務（API + Web + WebSocket）..."
+# 2. 啟動單一進程（8801）—— API + 前端 + WebSocket
+echo "[*] 啟動 8801 後台服務（API + Web + WebSocket）..."
 cd ${WORKDIR}
 nohup python3 -m uvicorn ingest_server:app --host 0.0.0.0 --port ${PORT} > ${LOGFILE} 2>&1 &
 PID=$!
@@ -97,17 +96,17 @@ PID=$!
 sleep 2
 echo "----------------------------------------------------------"
 if ps -p $PID > /dev/null; then
-    echo "✅ [8802 後台] 啟動成功 (PID: ${PID})"
+    echo "✅ [8801 後台] 啟動成功 (PID: ${PID})"
 else
-    echo "❌ [8802 後台] 啟動失敗，請查 ${LOGFILE}"
+    echo "❌ [8801 後台] 啟動失敗，請查 ${LOGFILE}"
 fi
 echo "----------------------------------------------------------"
 echo "👉 端點："
 echo "   - 公網地圖：https://gps.xdove.win/"
 echo "   - RingOps 作業站：https://gps.xdove.win/otg"
 echo "   - API Swagger：https://gps.xdove.win/docs"
-echo "   - 本地：http://192.168.120.218:8802/"
-echo "   - 鴿環狀態：http://192.168.120.218:8802/api/v1/devices/status"
-echo "   - WebSocket：ws://192.168.120.218:8802/ws/devices"
+echo "   - 本地：http://192.168.120.218:8801/"
+echo "   - 鴿環狀態：http://192.168.120.218:8801/api/v1/devices/status"
+echo "   - WebSocket：ws://192.168.120.218:8801/ws/devices"
 echo "   - 日誌：${LOGFILE}"
 echo "=========================================================="

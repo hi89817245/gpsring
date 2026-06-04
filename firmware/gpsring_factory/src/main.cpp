@@ -9,7 +9,7 @@
 #include <HTTPClient.h>
 
 #ifndef GPSRING_FIRMWARE_VERSION
-#define GPSRING_FIRMWARE_VERSION "v0.3.8"
+#define GPSRING_FIRMWARE_VERSION "v0.3.9"
 #endif
 #ifndef GPSRING_DEVICE_PREFIX
 #define GPSRING_DEVICE_PREFIX "G0703"
@@ -42,7 +42,7 @@
 #define GPSRING_OTA_HOST "192.168.120.218"
 #endif
 #ifndef GPSRING_OTA_PORT
-#define GPSRING_OTA_PORT 8802
+#define GPSRING_OTA_PORT 8801
 #endif
 
 static const uint32_t SERIAL_BAUD  = 115200;
