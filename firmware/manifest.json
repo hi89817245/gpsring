@@ -1,6 +1,6 @@
 {
   "name": "GPSRing",
-  "version": "0.3.9",
+  "version": "0.3.11",
   "home_assistant_domain": "esphome",
   "funding_url": "https://gps.xdove.win",
   "new_install_prompt_erase": false,
@@ -9,10 +9,14 @@
       "chipFamily": "ESP32-C3",
       "parts": [
         {
-          "path": "gpsring-v0.3.9-merged-esp32c3.bin",
+          "path": "gpsring-v0.3.11-merged-esp32c3.bin",
           "offset": 0
         }
       ]
     }
-  ]
+  ],
+  "latest_sha256": "0eb469f2f9f9bb61d035defa095f77628824792aa5d32b97e10d25eb7b5699e6",
+  "latest_size": 1118720,
+  "latest_lan_url": "http://192.168.120.218:8801/firmware/gpsring-v0.3.11-merged-esp32c3.bin",
+  "latest_public_url": "https://gps.xdove.win/firmware/gpsring-v0.3.11-merged-esp32c3.bin"
 }

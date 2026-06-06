@@ -1,6 +1,6 @@
 #!/bin/bash
 # start88 服務快速啟動/重啟/狀態查看指令
-# 版本：v0.3.8  架構：單進程 8801（reverse proxy 指向此）
+# 版本：v0.3.11  架構：單進程 8801（reverse proxy 指向此）
 # gps.xdove.win  → openresty → 8801（含 API + 靜態前端 + WebSocket /ws/devices）
 #
 # 用法：
@@ -11,14 +11,14 @@
 #   ./start88.sh restart   → 同 ./start88.sh（別名）
 #   ./start88.sh otg       → 開啟 RingOps 鴿環作業站網址
 #   ./start88.sh mcu <ip>  → 查詢指定 MCU /status
-#   ./start88.sh ota <ip>  → OTA 推送最新 v0.3.7 韌體到指定 MCU
+#   ./start88.sh ota <ip>  → OTA 推送最新 v0.3.11 韌體到指定 MCU
 
 PORT=8801
 WORKDIR="/home/hi/workspace/gpsring"
-VERSION="v0.3.8"
+VERSION="v0.3.11"
 LOGFILE="/tmp/ingest_server_8801.log"
 TITLE="GPS鴿環後台（單進程版）"
-LATEST_FW="${WORKDIR}/firmware/gpsring-v0.3.8-esp32c3.bin"
+LATEST_FW="${WORKDIR}/firmware/gpsring-v0.3.11-merged-esp32c3.bin"
 
 # ── 子命令處理 ────────────────────────────────────────────
 case "$1" in
@@ -34,7 +34,7 @@ case "$1" in
     echo ""
     echo "📡 MCU 在線裝置："
     curl -s --connect-timeout 3 http://127.0.0.1:${PORT}/api/v1/devices/status 2>/dev/null \
-      | python3 -c "import sys,json; d=json.load(sys.stdin); [print(f'  {x[\"ring_id\"]} fid={x.get(\"factory_id\",\"?\")} state={x[\"state\"]} fw={x[\"firmware_version\"]} online={x[\"online\"]}') for x in d['devices']]" 2>/dev/null \
+      | python3 -c "import sys,json; d=json.load(sys.stdin); devs=d.get('devices',[]); [print(f'  {x.get(\"ring_id\") or x.get(\"device_id\") or x.get(\"mac\",\"?\")} fid={x.get(\"factory_id\",\"?\")} state={x.get(\"state\",\"?\")} fw={x.get(\"firmware_version\",\"?\")} ip={x.get(\"ip\",\"?\")} online={x.get(\"online\",False)}') for x in devs]; print('  (無在線裝置)' if not devs else '', end='')" 2>/dev/null \
       || echo "  (服務未回應)"
     echo ""
     echo "🌐 端點："
@@ -82,7 +82,7 @@ echo "      GPS 鴿環後台 [start88] - ${VERSION}  ${TITLE}"
 echo "=========================================================="
 
 # 1. 清理舊服務
-echo "[*] 清理 Port 8801 / 8802 舊進程..."
+echo "[*] 清理 Port 8801 舊進程..."
 kill -9 $(lsof -t -i:8801) 2>/dev/null || true
 sleep 1
 

@@ -86,7 +86,7 @@ cp -f "$APP_BIN" "$PUBLISHED_PATH"
 sha256sum "$PUBLISHED_PATH" | tee "/share/esp32/${PUBLISHED_NAME}.sha256"
 "$ROOT/scripts/publish_firmware.sh" "$PUBLISHED_PATH" "$VERSION" >/tmp/gpsring-publish-fw.log
 
-LAN_URL="http://192.168.120.218:8802/firmware/${PUBLISHED_NAME}"
+LAN_URL="http://192.168.120.218:8801/firmware/${PUBLISHED_NAME}"
 PUBLIC_URL="https://gps.xdove.win/firmware/${PUBLISHED_NAME}"
 echo "[GPSRing] published app/OTA bin: $PUBLISHED_PATH"
 echo "[GPSRing] LAN:    $LAN_URL"
@@ -119,5 +119,9 @@ ser.close()
 PY
 fi
 
-SUMMARY="【GPSRing ${VERSION}｜120.218】**Factory 韌體 build/publish/flash 完成**\nbin: ${PUBLIC_URL}\nLAN: ${LAN_URL}\nport: ${PORT}"
-curl -fsS -H 'Title: GPSRing factory firmware' -H 'Tags: satellite,rocket' -d "$SUMMARY" https://ntfy.xdove.win/hermes218 >/dev/null || true
+SUMMARY="【GPSRing ${VERSION}｜120.218】\n\n✅ Factory 韌體 build / publish / flash 完成\n\n■ Firmware\n- Public: ${PUBLIC_URL}\n- LAN: ${LAN_URL}\n\n■ Serial / Port\n- Serial: ${PORT}\n- Backend/API: 8801 only\n\n■ 下一步\n- 讀 serial console 驗證 WiFi、FID、heartbeat、GPS fallback、OTA。"
+curl -fsS \
+  -H "Title: GPSRing ${VERSION}｜Factory firmware" \
+  -H 'Tags: white_check_mark,satellite,rocket' \
+  -d "$SUMMARY" \
+  https://ntfy.xdove.win/hermes218 >/dev/null || true

@@ -9,7 +9,7 @@
 #include <HTTPClient.h>
 
 #ifndef GPSRING_FIRMWARE_VERSION
-#define GPSRING_FIRMWARE_VERSION "v0.3.9"
+#define GPSRING_FIRMWARE_VERSION "v0.3.11"
 #endif
 #ifndef GPSRING_DEVICE_PREFIX
 #define GPSRING_DEVICE_PREFIX "G0703"
@@ -44,16 +44,23 @@
 #ifndef GPSRING_OTA_PORT
 #define GPSRING_OTA_PORT 8801
 #endif
+#ifndef GPSRING_BACKEND_HOST
+#define GPSRING_BACKEND_HOST "192.168.120.218"
+#endif
+#ifndef GPSRING_BACKEND_PORT
+#define GPSRING_BACKEND_PORT 8801
+#endif
 
 static const uint32_t SERIAL_BAUD  = 115200;
 static const uint32_t GPS_PROBE_MS = 15000;
 
 // ── 龜山島預設座標（無GPS時用） ────────────────────────────
 // 龜山島頭  24.845°N  121.940°E（WGS84）
-// 每個 factory_id 往「上（北）」偏 10m ≈ 0.0000899°
+// 每個 factory_id 往「上（北）」偏 10m ≈ 0.0000899°；每次 fallback heartbeat 往「右（東）」+10m
 static const double GPS_DEFAULT_LAT  = 24.845000;
 static const double GPS_DEFAULT_LON  = 121.940000;
-static const double GPS_OFFSET_DEG   = 0.0000899; // 10m 北偏
+static const double GPS_OFFSET_DEG   = 0.0000899; // 10m 北偏（FID 分層用）
+static const double GPS_EAST_10M_DEG = 0.0000988; // 龜山島緯度附近 10m 東偏（經度）
 
 // ── LED 狀態機 ────────────────────────────────────────────
 // ESP32-C3 內建 LED = GPIO8（低電平亮）
@@ -70,22 +77,25 @@ static const double GPS_OFFSET_DEG   = 0.0000899; // 10m 北偏
 #define LED_OFF (LED_ACTIVE_LOW ? HIGH : LOW)
 
 // 狀態說明：
-//  STANDBY        = 電源開機/WiFi已連，等待NFC配對或上車動作
-//  GPS_SEARCHING  = 已配對，GPS搜尋中
+//  INIT           = 開機/配對/裝籠前初始化；即使 GPS 未定位也回報 FID fallback 龜山島座標
+//  STANDBY        = 初始化後待機，等待NFC配對或上車動作
+//  GPS_SEARCHING  = 已啟動 GPS 探測但尚未定位
 //  GPS_FIXED      = GPS已定位
 //  CARING         = NFC感應上車，進入護送模式（比賽中）
 //  RACING         = 正式競飛中（鴿返計時）
 enum DeviceState {
+  STATE_INIT,           // 開機初始化：保留龜山島 fallback 座標供後台顯示
   STATE_STANDBY,        // 待機：WiFi已連，等NFC上車配對
   STATE_GPS_SEARCHING,
   STATE_GPS_FIXED,
   STATE_CARING,         // 上車護送（NFC感應後）
   STATE_RACING          // 競飛中
 };
-DeviceState deviceState = STATE_STANDBY;
+DeviceState deviceState = STATE_INIT;
 
 const char* stateLabel() {
   switch (deviceState) {
+    case STATE_INIT:          return "init";
     case STATE_STANDBY:       return "standby";
     case STATE_GPS_SEARCHING: return "gps_searching";
     case STATE_GPS_FIXED:     return "gps_fixed";
@@ -95,12 +105,13 @@ const char* stateLabel() {
   }
 }
 
-// 非阻塞 LED 閃爍：各 state 閃爍規則（無WiFi一律滅）
-// standby=1閃/2s  gps_searching=2閃/2s  gps_fixed=3閃/2s
+// 非阻塞 LED 閃爍：各 state 閃爍規則（無WiFi或 ledDisabled 一律滅）
+// init/standby=1閃/2s  gps_searching=2閃/2s  gps_fixed=3閃/2s
 // caring=每秒4閃+停1s（省電）  racing=5快閃/1s
 struct BlinkPattern { uint8_t times; uint16_t onMs; uint16_t offMs; uint16_t pauseMs; };
 // onMs 加長至 300ms 以便肉眼區分閃爍次數
 static const BlinkPattern BLINK_PATTERNS[] = {
+  {1, 300, 200, 1500},  // STATE_INIT          → 1閃/2s
   {1, 300, 200, 1500},  // STATE_STANDBY       → 1閃/2s
   {2, 300, 200,  700},  // STATE_GPS_SEARCHING  → 2閃/2s
   {3, 300, 180,  560},  // STATE_GPS_FIXED      → 3閃/2s
@@ -111,11 +122,31 @@ static const BlinkPattern BLINK_PATTERNS[] = {
 static uint32_t ledLastMs   = 0;
 static uint8_t  ledBlinkIdx = 0;
 static bool     ledPhaseOn  = false;
+bool ledDisabled = false;
+
+void forceLedOff() {
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LED_OFF);
+}
+
+// 開機 WiFi 介入前 GPIO8 藍燈自測：每秒 ON/OFF/ON/OFF，各 0.25 秒。
+// 用於肉眼確認「GPIO8 本身是否受控」，不依賴 WiFi / state / ledDisabled。
+void bootLedSelfTest() {
+  Serial.println("[GPSRing][LED] boot self-test start: GPIO8 0.25s ON/OFF/ON/OFF before WiFi");
+  for (uint8_t cycle = 0; cycle < 4; ++cycle) {
+    digitalWrite(LED_BUILTIN, LED_ON);  delay(250);
+    digitalWrite(LED_BUILTIN, LED_OFF); delay(250);
+    digitalWrite(LED_BUILTIN, LED_ON);  delay(250);
+    digitalWrite(LED_BUILTIN, LED_OFF); delay(250);
+  }
+  forceLedOff();
+  Serial.println("[GPSRing][LED] boot self-test done; LED forced OFF before WiFi");
+}
 
 void updateLed() {
-  // 無WiFi → LED 全滅
-  if (WiFi.status() != WL_CONNECTED) {
-    digitalWrite(LED_BUILTIN, LED_OFF);
+  // ledDisabled 或 無WiFi → LED 全滅
+  if (ledDisabled || WiFi.status() != WL_CONNECTED) {
+    forceLedOff();
     return;
   }
   const BlinkPattern &p = BLINK_PATTERNS[deviceState];
@@ -159,6 +190,8 @@ String   wifiSsid   = "";
 String   wifiPass   = "";
 String   ringno1    = "";   // 腳環號（NVS ringno1）
 String   noteText   = "";   // 備註（NVS note）
+String   backendHost = GPSRING_BACKEND_HOST;
+uint16_t backendPort = GPSRING_BACKEND_PORT;
 
 String macCompact() {
   uint64_t mac = ESP.getEfuseMac();
@@ -177,20 +210,22 @@ String buildHash() {
   return String(buf);
 }
 
-// ── 預設座標（龜山島 + factory_id 偏移）──────────────────
-// 模擬飛行偏移（racing 時每次 heartbeat 往東移動 ~5m）
-static double simLon_offset = 0.0;
+String backendUrl(const char *path) {
+  return String("http://") + backendHost + ":" + String(backendPort) + String(path);
+}
+
+// ── 預設座標（龜山島 + factory_id 北偏 + fallback heartbeat 東偏）────
+// 無 GPS fix 時，每次 heartbeat 往右/東移動 10m，方便在地圖肉眼確認心跳有更新。
+static uint32_t fallbackHeartbeatStep = 0;
+
+void advanceFallbackCoordOnHeartbeat() {
+  fallbackHeartbeatStep++;
+  if (fallbackHeartbeatStep > 200) fallbackHeartbeatStep = 0;
+}
 
 void getDefaultCoord(double &lat, double &lon) {
   lat = GPS_DEFAULT_LAT + GPS_OFFSET_DEG * (factoryId > 0 ? factoryId - 1 : 0);
-  if (deviceState == STATE_RACING) {
-    // racing 模式：每次呼叫往東偏移 ~5m（0.0000449°），最多 200 步後重置
-    simLon_offset += 0.0000449;
-    if (simLon_offset > 200 * 0.0000449) simLon_offset = 0.0;
-  } else {
-    simLon_offset = 0.0; // 非 racing 重置
-  }
-  lon = GPS_DEFAULT_LON + simLon_offset;
+  lon = GPS_DEFAULT_LON + (GPS_EAST_10M_DEG * fallbackHeartbeatStep);
 }
 
 String jsonStatus() {
@@ -221,7 +256,10 @@ String jsonStatus() {
   json += "\"hb_interval_ms\":" + String(heartbeatIntervalMs) + ",";
   json += "\"wifi_ssid\":\"" + wifiSsid + "\",";
   json += "\"ringno1\":\"" + ringno1 + "\",";
-  json += "\"note\":\"" + noteText + "\"";
+  json += "\"note\":\"" + noteText + "\",";
+  json += "\"backend_host\":\"" + backendHost + "\",";
+  json += "\"backend_port\":" + String(backendPort) + ",";
+  json += "\"led_disabled\":" + String(ledDisabled ? "true" : "false");
   json += "}";
   return json;
 }
@@ -292,12 +330,12 @@ pre{font-size:0.78em;overflow:auto;background:#0d0d1a;padding:8px;border-radius:
   html += GPSRING_FIRMWARE_VERSION;
   html += R"rawhtml(</h2>
 <div class='card'>
-<b>裝置狀態</b>
+<b>裝置狀態</b><div style='font-size:.8em;color:#aaa;margin-top:4px'>init = 開機自檢與 FID fallback 座標；GPS 未定位時仍回報龜山島預設點。</div>
 <div id='tags'></div>
 <pre id='st'></pre>
 </div>
 <div class='card'>
-<b>🔢 Factory ID / 腳環設定</b>
+<b title='設定出廠流水號與第一鴿環號，會寫入 NVS'>🔢 Factory ID / 腳環設定</b>
 <label>Factory ID (1~99999)</label><input id='fid' type='number' min='1' max='99999' placeholder='留空不修改'>
 <label>腳環號 ringno1</label><input id='rno' type='text' placeholder='例: A12345'>
 <label>備註 note</label><input id='note2' type='text' placeholder='選填'>
@@ -308,10 +346,12 @@ pre{font-size:0.78em;overflow:auto;background:#0d0d1a;padding:8px;border-radius:
 <div id='msg2'></div>
 </div>
 <div class='card'>
-<b>📶 WiFi / 心跳設定</b>
+<b title='WiFi 是 MCU 上網；heartbeat 會送到 backend_host/backend_port，不是送回 MCU 自己'>📶 WiFi / 心跳設定</b>
 <label>WiFi SSID</label><input id='s' type='text' placeholder='留空=萬用字元自動'>
 <label>WiFi 密碼</label><input id='p' type='password' placeholder='留空不修改'>
 <label>心跳間隔 (ms, 5000~60000)</label><input id='h' type='number' min='5000' max='60000' step='1000' value='10000'>
+<label>後台 Host（heartbeat/API）</label><input id='bh' type='text' placeholder='192.168.120.218'>
+<label>後台 Port</label><input id='bp' type='number' min='1' max='65535' value='8801'>
 <div class='row'>
 <button type='button' onclick='save()'>💾 儲存並套用</button>
 <button type='button' onclick='reboot()' class='yel'>🔄 重啟</button>
@@ -319,15 +359,15 @@ pre{font-size:0.78em;overflow:auto;background:#0d0d1a;padding:8px;border-radius:
 <div id='msg'></div>
 </div>
 <div class='card'>
-<b>💡 LED 測試 (GPIO8 active-LOW)</b>
+<b>💡 LED 測試 (GPIO8 active-LOW)</b><div style='font-size:.8em;color:#aaa;margin-top:4px'>v0.3.11 開機且 WiFi 介入前會先做 GPIO8 自測：每秒 ON/OFF/ON/OFF，各 0.25 秒。若 LED_DISABLE 後仍常亮，優先判斷為板載電源燈或非 GPIO8。</div>
 <div class='row'>
 <button type='button' class='grn' onclick='sendSerial("STANDBY")'>待機閃</button>
 <button type='button' onclick='sendSerial("CARING")'>護送閃</button>
 <button type='button' class='red' onclick='sendSerial("RACING")'>競飛閃</button>
 </div>
 <div class='row'>
-<button type='button' onclick='ledOn()'>🔵 常亮</button>
-<button type='button' onclick='ledOff()'>⚫ 滅燈</button>
+<button type='button' onclick='sendSerial("LED_DISABLE")'>🚫 LED_DISABLE</button>
+<button type='button' onclick='sendSerial("LED_ENABLE")'>💡 LED_ENABLE</button>
 <button type='button' onclick='sendSerial("STATUS")'>📋 STATUS</button>
 </div>
 <pre id='ledlog' style='max-height:80px'>-- LED log --</pre>
@@ -361,10 +401,13 @@ async function save(){
   const s=document.getElementById('s').value.trim();
   const p=document.getElementById('p').value.trim();
   const h=parseInt(document.getElementById('h').value)||10000;
+  const bh=document.getElementById('bh').value.trim();
+  const bp=parseInt(document.getElementById('bp').value)||8801;
   if(s)body.wifi_ssid=s; if(p)body.wifi_pass=p; body.hb_interval=h;
+  if(bh)body.backend_host=bh; if(bp)body.backend_port=bp;
   const r=await fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();
-  document.getElementById('msg').textContent=j.ok?'✅ WiFi/心跳已儲存':'❌ 失敗';
+  document.getElementById('msg').textContent=j.ok?'✅ WiFi/心跳/後台已儲存':'❌ 失敗';
   setTimeout(loadStatus,1200);
 }
 async function saveFid(){
@@ -396,14 +439,6 @@ async function sendSerial(cmd){
     const t=await r.text();
     document.getElementById('ledlog').textContent+='\n> '+cmd+' => '+t;
   }catch(e){document.getElementById('ledlog').textContent+='\n[ERR] '+e;}
-}
-async function ledOn(){
-  await fetch('/led?v=1');
-  document.getElementById('ledlog').textContent+='\n> LED ON (常亮)';
-}
-async function ledOff(){
-  await fetch('/led?v=0');
-  document.getElementById('ledlog').textContent+='\n> LED OFF (滅)';
 }
 loadStatus(); setInterval(loadStatus,8000);
 </script></body></html>)rawhtml";
@@ -477,6 +512,9 @@ void setupWiFiAndOtaWeb() {
     heartbeatIntervalMs = prefs.getUInt("hb_interval", 10000);
     ringno1   = prefs.getString("ringno1", "");
     noteText  = prefs.getString("note", "");
+    backendHost = prefs.getString("backend_host", GPSRING_BACKEND_HOST);
+    backendPort = (uint16_t)prefs.getUInt("backend_port", GPSRING_BACKEND_PORT);
+    ledDisabled = prefs.getBool("led_disabled", false);
     prefs.end();
   }
   WiFi.mode(WIFI_STA);
@@ -551,6 +589,8 @@ void setupWiFiAndOtaWeb() {
     String newFid   = getParam("factory_id");
     String newRno   = getParam("ringno1");
     String newNote  = getParam("note");
+    String newBackendHost = getParam("backend_host");
+    String newBackendPort = getParam("backend_port");
     if (newFid.length() > 0) {
       uint32_t fid = (uint32_t)newFid.toInt();
       if (fid >= 1 && fid <= 99999) { prefs.putUInt("factory_id", fid); factoryId = fid; resp += "\"factory_id\":" + String(fid) + ","; }
@@ -578,6 +618,8 @@ void setupWiFiAndOtaWeb() {
     else if (upper == "CARING")  { deviceState = STATE_CARING;  resp = "state->caring"; }
     else if (upper == "RACING")  { deviceState = STATE_RACING;  resp = "state->racing"; }
     else if (upper == "STANDBY") { deviceState = STATE_STANDBY; resp = "state->standby"; }
+    else if (upper == "LED_DISABLE") { ledDisabled = true; prefs.begin("gpsring", false); prefs.putBool("led_disabled", true); prefs.end(); forceLedOff(); resp = "LED disabled; GPIO8 forced OFF"; }
+    else if (upper == "LED_ENABLE")  { ledDisabled = false; prefs.begin("gpsring", false); prefs.putBool("led_disabled", false); prefs.end(); ledLastMs = millis(); ledBlinkIdx = 0; ledPhaseOn = false; resp = "LED enabled"; }
     else if (upper == "STATUS")  { resp = jsonStatus(); }
     else { resp = "unknown cmd: " + cmd; }
     server.send(200, "text/plain", resp);
@@ -586,9 +628,9 @@ void setupWiFiAndOtaWeb() {
   server.on("/led", HTTP_GET, []() {
     server.sendHeader("Access-Control-Allow-Origin", "*");
     String v = server.arg("v");
-    if (v == "1")      { digitalWrite(LED_BUILTIN, LED_ON);  server.send(200, "text/plain", "LED ON"); }
-    else if (v == "0") { digitalWrite(LED_BUILTIN, LED_OFF); server.send(200, "text/plain", "LED OFF"); }
-    else { server.send(400, "text/plain", "use ?v=0 or ?v=1"); }
+    if (v == "0") { ledDisabled = true; prefs.begin("gpsring", false); prefs.putBool("led_disabled", true); prefs.end(); forceLedOff(); server.send(200, "text/plain", "LED disabled; GPIO8 forced OFF"); }
+    else if (v == "1") { ledDisabled = false; prefs.begin("gpsring", false); prefs.putBool("led_disabled", false); prefs.end(); ledLastMs = millis(); ledBlinkIdx = 0; ledPhaseOn = false; server.send(200, "text/plain", "LED enabled"); }
+    else { server.send(400, "text/plain", "use ?v=0(disable) or ?v=1(enable)"); }
   });
   server.begin();
   Serial.println("[GPSRing][OTA] web updater ready: GET /status, POST /ota");
@@ -602,12 +644,19 @@ void setup() {
 
   pinMode(GPS_POWER_PIN, OUTPUT); digitalWrite(GPS_POWER_PIN, HIGH);
   pinMode(TAMPER_PIN, INPUT_PULLUP);
-  pinMode(LED_BUILTIN, OUTPUT);   digitalWrite(LED_BUILTIN, LED_OFF); // 初始滅
+  pinMode(LED_BUILTIN, OUTPUT);   forceLedOff(); // 初始滅
   analogReadResolution(12);
+
+  bootLedSelfTest();
 
   prefs.begin("gpsring", false);
   bootCount = prefs.getUInt("boot_count", 0) + 1;
   prefs.putUInt("boot_count", bootCount);
+
+  // 先連 WiFi，後續 factory_id 才能向後台取號；setupWiFiAndOtaWeb() 會啟動 /status /ota。
+  prefs.end();
+  setupWiFiAndOtaWeb();
+  prefs.begin("gpsring", false);
 
   // ── factory_id：每次首次燒錄（boot_count重置時）自動 +1 ──
   // factory_id 只要存在就沿用；若 NVS 全空（新板）才 +1
@@ -616,7 +665,7 @@ void setup() {
     // 向後台取得唯一 factory_id（確保多板不重疊）
     if (WiFi.status() == WL_CONNECTED) {
       HTTPClient http;
-      String url = "http://" GPSRING_OTA_HOST ":" + String(GPSRING_OTA_PORT) + "/api/v1/factory/next-id";
+      String url = backendUrl("/api/v1/factory/next-id");
       http.begin(url);
       int code = http.GET();
       if (code == 200) {
@@ -676,7 +725,8 @@ void setup() {
                 digitalRead(TAMPER_PIN) == LOW ? "true" : "false", analogRead(BATTERY_ADC_PIN));
 
   probeGps(GPS_PROBE_MS);
-  deviceState = gpsFixed ? STATE_GPS_FIXED : (gpsSeen ? STATE_GPS_SEARCHING : STATE_STANDBY);
+  // 開機後保留 init 狀態，讓後台可穩定看到 FID fallback 龜山島座標；GPS 指令/後續狀態再切換。
+  deviceState = STATE_INIT;
   printStatusLine("[GPSRing][SMOKE]");
   Serial.println("[GPSRing] JSON_STATUS " + jsonStatus());
   Serial.println("[GPSRing] Commands: STATUS, GPS, REBOOT, CARING, RACING, STANDBY");
@@ -696,11 +746,23 @@ void loop() {
     String rawCmd = cmd;  // toUpperCase 後的版本
     // 對 SET_NOTE / SET_RINGNO 用原始輸入（重新讀一次前已 toUpper，故從 upper prefix 之後擷取即可）
     if      (cmd == "STATUS") { Serial.println("[GPSRing] JSON_STATUS " + jsonStatus()); }
-    else if (cmd == "GPS") { gpsSeen=false; gpsFixed=false; lastNmea=""; probeGps(GPS_PROBE_MS); printStatusLine("[GPSRing][GPS]"); }
+    else if (cmd == "GPS") { gpsSeen=false; gpsFixed=false; lastNmea=""; probeGps(GPS_PROBE_MS); deviceState = gpsFixed ? STATE_GPS_FIXED : STATE_GPS_SEARCHING; printStatusLine("[GPSRing][GPS]"); }
     else if (cmd == "REBOOT")  { Serial.println("[GPSRing] rebooting"); delay(200); ESP.restart(); }
     else if (cmd == "RACING")  { deviceState = STATE_RACING;  Serial.println("[GPSRing] state -> racing"); }
     else if (cmd == "CARING")  { deviceState = STATE_CARING;  Serial.println("[GPSRing] state -> caring"); }
     else if (cmd == "STANDBY") { deviceState = STATE_STANDBY; Serial.println("[GPSRing] state -> standby"); }
+    else if (cmd == "LED_DISABLE") {
+      ledDisabled = true;
+      prefs.begin("gpsring", false); prefs.putBool("led_disabled", true); prefs.end();
+      forceLedOff();
+      Serial.println("[GPSRing] LED_DISABLE OK; GPIO8 forced OFF");
+    }
+    else if (cmd == "LED_ENABLE") {
+      ledDisabled = false;
+      prefs.begin("gpsring", false); prefs.putBool("led_disabled", false); prefs.end();
+      ledLastMs = millis(); ledBlinkIdx = 0; ledPhaseOn = false;
+      Serial.println("[GPSRing] LED_ENABLE OK");
+    }
     // ── RingOps /otg 進階指令 ──────────────────────────────────────
     else if (cmd.startsWith("SET_FID:")) {
       uint32_t fid = (uint32_t)cmd.substring(8).toInt();
@@ -758,10 +820,11 @@ void loop() {
   static uint32_t lastBeat = 0;
   if (millis() - lastBeat > heartbeatIntervalMs) {
     lastBeat = millis();
+    if (!gpsFixed) advanceFallbackCoordOnHeartbeat();
     printStatusLine("[GPSRing][HEARTBEAT]");
     if (WiFi.status() == WL_CONNECTED) {
       HTTPClient http;
-      String url = "http://" GPSRING_OTA_HOST ":" + String(GPSRING_OTA_PORT) + "/api/v1/devices/heartbeat";
+      String url = backendUrl("/api/v1/devices/heartbeat");
       http.begin(url);
       http.addHeader("Content-Type", "application/json");
       double lat = lastLat, lon = lastLon;
