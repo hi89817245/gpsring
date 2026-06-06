@@ -1,24 +1,24 @@
 {
   "project": "GPSRing",
-  "version": "v0.3.14",
-  "latest": "gpsring-v0.3.14-merged-esp32c3.bin",
-  "ota_app": "gpsring-v0.3.14-esp32c3.bin",
-  "factory_merged": "gpsring-v0.3.14-merged-esp32c3.bin",
-  "published_at": "2026-06-06T01:51:58.770958+00:00",
+  "version": "v0.3.15",
+  "latest": "gpsring-v0.3.15-merged-esp32c3.bin",
+  "ota_app": "gpsring-v0.3.15-esp32c3.bin",
+  "factory_merged": "gpsring-v0.3.15-merged-esp32c3.bin",
+  "published_at": "2026-06-06T03:42:48.986965+00:00",
   "files": [
     {
-      "file": "gpsring-v0.3.14-esp32c3.bin",
+      "file": "gpsring-v0.3.15-esp32c3.bin",
       "size": 1054112,
-      "sha256": "d33722a7431bbad55ffecb2836a87754d1f63e312ea98475fd25142aaf3c8358",
-      "url_lan": "http://192.168.120.218:8801/firmware/gpsring-v0.3.14-esp32c3.bin",
-      "url_public": "https://gps.xdove.win/firmware/gpsring-v0.3.14-esp32c3.bin"
+      "sha256": "30bf5c6661aed55dae40daf4f3113265c2788d4daa63197ba9a6d322a998a09a",
+      "url_lan": "http://192.168.120.218:8801/firmware/gpsring-v0.3.15-esp32c3.bin",
+      "url_public": "https://gps.xdove.win/firmware/gpsring-v0.3.15-esp32c3.bin"
     },
     {
-      "file": "gpsring-v0.3.14-merged-esp32c3.bin",
+      "file": "gpsring-v0.3.15-merged-esp32c3.bin",
       "size": 1119648,
-      "sha256": "2bdd0a3131f838fe8394b1dc2438d9ca737e2310cd8f66e786a8896389540ff1",
-      "url_lan": "http://192.168.120.218:8801/firmware/gpsring-v0.3.14-merged-esp32c3.bin",
-      "url_public": "https://gps.xdove.win/firmware/gpsring-v0.3.14-merged-esp32c3.bin"
+      "sha256": "0606bb71815420bd0e07c1c6f0b3ed2754aa7797a0a08898d8b8f2d83bad917c",
+      "url_lan": "http://192.168.120.218:8801/firmware/gpsring-v0.3.15-merged-esp32c3.bin",
+      "url_public": "https://gps.xdove.win/firmware/gpsring-v0.3.15-merged-esp32c3.bin"
     }
   ],
   "note": "HTTP OTA must use ota_app (app-only bin); merged bin is for factory/full flash."

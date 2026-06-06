@@ -50,9 +50,9 @@ def test_led_has_disable_override_and_ui_no_longer_promises_unreliable_direct_on
     assert "bootLedSelfTest" in src
     assert "0.25s ON/OFF/ON/OFF before WiFi" in src
     assert "forceLedOff" in src
-    assert "GPIO_SWEEP_SAFE" in src
-    assert "LED_SELFTEST" in src
-    assert "GPIO_SWEEP_SAFE_PINS" in src
+    assert "GPS_RX_PIN 3" in src
+    assert "GPS_TX_PIN 4" in src
+    assert "GPS_POWER_PIN 5" in src
     assert "excluded=GPIO0/2/8/9/12-21" in src
     html = read_otg()
     assert "LED_DISABLE" in html

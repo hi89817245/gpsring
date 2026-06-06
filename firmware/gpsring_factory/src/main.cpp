@@ -9,16 +9,16 @@
 #include <HTTPClient.h>
 
 #ifndef GPSRING_FIRMWARE_VERSION
-#define GPSRING_FIRMWARE_VERSION "v0.3.14"
+#define GPSRING_FIRMWARE_VERSION "v0.3.15"
 #endif
 #ifndef GPSRING_DEVICE_PREFIX
 #define GPSRING_DEVICE_PREFIX "G0703"
 #endif
 #ifndef GPS_RX_PIN
-#define GPS_RX_PIN 20
+#define GPS_RX_PIN 3
 #endif
 #ifndef GPS_TX_PIN
-#define GPS_TX_PIN 21
+#define GPS_TX_PIN 4
 #endif
 #ifndef GPS_POWER_PIN
 #define GPS_POWER_PIN 5
