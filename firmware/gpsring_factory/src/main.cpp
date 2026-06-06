@@ -9,7 +9,7 @@
 #include <HTTPClient.h>
 
 #ifndef GPSRING_FIRMWARE_VERSION
-#define GPSRING_FIRMWARE_VERSION "v0.3.11"
+#define GPSRING_FIRMWARE_VERSION "v0.3.14"
 #endif
 #ifndef GPSRING_DEVICE_PREFIX
 #define GPSRING_DEVICE_PREFIX "G0703"
@@ -76,6 +76,13 @@ static const double GPS_EAST_10M_DEG = 0.0000988; // 龜山島緯度附近 10m �
 #define LED_ON  (LED_ACTIVE_LOW ? LOW  : HIGH)
 #define LED_OFF (LED_ACTIVE_LOW ? HIGH : LOW)
 
+// GPIO 診斷只掃「相對安全」的一般輸出腳：
+// - 排除 GPIO18/19（USB D-/D+）、GPS_RX/TX 20/21、常見 flash SPI 12~17
+// - 排除 GPIO8/9（strap/BOOT/板載 LED 高風險）與 GPIO0/2（boot strap/ADC 等常被外部電路拉動）
+// 若現場要找真正的板載藍燈腳位，先用這組從肉眼/萬用表觀察；不要盲切所有 GPIO。
+static const uint8_t GPIO_SWEEP_SAFE_PINS[] = {3, 4, 7, 10};
+static const uint8_t GPIO_SWEEP_SAFE_COUNT = sizeof(GPIO_SWEEP_SAFE_PINS) / sizeof(GPIO_SWEEP_SAFE_PINS[0]);
+
 // 狀態說明：
 //  INIT           = 開機/配對/裝籠前初始化；即使 GPS 未定位也回報 FID fallback 龜山島座標
 //  STANDBY        = 初始化後待機，等待NFC配對或上車動作
@@ -141,6 +148,29 @@ void bootLedSelfTest() {
   }
   forceLedOff();
   Serial.println("[GPSRing][LED] boot self-test done; LED forced OFF before WiFi");
+}
+
+String gpioSweepSafe() {
+  String out = "GPIO_SWEEP_SAFE start; pins=";
+  for (uint8_t i = 0; i < GPIO_SWEEP_SAFE_COUNT; ++i) {
+    if (i) out += ",";
+    out += String(GPIO_SWEEP_SAFE_PINS[i]);
+  }
+  Serial.println("[GPSRing][GPIO] SAFE sweep start. Watch LED / meter; each pin HIGH/LOW/HIGH/LOW 250ms.");
+  for (uint8_t i = 0; i < GPIO_SWEEP_SAFE_COUNT; ++i) {
+    uint8_t pin = GPIO_SWEEP_SAFE_PINS[i];
+    Serial.printf("[GPSRing][GPIO] test GPIO%u HIGH/LOW/HIGH/LOW\n", pin);
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, HIGH); delay(250);
+    digitalWrite(pin, LOW);  delay(250);
+    digitalWrite(pin, HIGH); delay(250);
+    digitalWrite(pin, LOW);  delay(250);
+    pinMode(pin, INPUT);
+  }
+  forceLedOff();
+  Serial.println("[GPSRing][GPIO] SAFE sweep done; GPIO8 LED forced OFF.");
+  out += "; done; excluded=GPIO0/2/8/9/12-21";
+  return out;
 }
 
 void updateLed() {
@@ -620,6 +650,8 @@ void setupWiFiAndOtaWeb() {
     else if (upper == "STANDBY") { deviceState = STATE_STANDBY; resp = "state->standby"; }
     else if (upper == "LED_DISABLE") { ledDisabled = true; prefs.begin("gpsring", false); prefs.putBool("led_disabled", true); prefs.end(); forceLedOff(); resp = "LED disabled; GPIO8 forced OFF"; }
     else if (upper == "LED_ENABLE")  { ledDisabled = false; prefs.begin("gpsring", false); prefs.putBool("led_disabled", false); prefs.end(); ledLastMs = millis(); ledBlinkIdx = 0; ledPhaseOn = false; resp = "LED enabled"; }
+    else if (upper == "LED_SELFTEST") { bootLedSelfTest(); resp = "LED_SELFTEST done: GPIO8 ON/OFF/ON/OFF x4; LED forced OFF"; }
+    else if (upper == "GPIO_SWEEP_SAFE") { resp = gpioSweepSafe(); }
     else if (upper == "STATUS")  { resp = jsonStatus(); }
     else { resp = "unknown cmd: " + cmd; }
     server.send(200, "text/plain", resp);

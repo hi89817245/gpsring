@@ -456,8 +456,20 @@ class NfcPairPayload(BaseModel):
 
 @app.post("/api/v1/devices/heartbeat")
 async def receive_heartbeat(payload: HeartbeatPayload):
-    """MCU 定期上報心跳 — 存入記憶體快取，含 lat/lon/factory_id，並廣播 WebSocket"""
+    """MCU 定期上報心跳 — 存入記憶體快取，含 lat/lon/factory_id，並廣播 WebSocket。
+
+    只靠目前 API 原本只能看到「最後一點」。這裡補上 heartbeat_count 與 boot_origin，
+    讓前端即使尚無 GPS fix，也能顯示開機原點、這是第幾次座標回報，並從後續
+    WebSocket/HTTP polling 累積可視軌跡。
+    """
     key = payload.mac or payload.device_id
+    now_ts = time.time()
+    prev = _device_heartbeats.get(key, {})
+    same_boot = bool(prev) and prev.get("boot_count") == payload.boot_count
+    heartbeat_count = int(prev.get("heartbeat_count", 0)) + 1 if same_boot else 1
+    boot_origin_lat = prev.get("boot_origin_lat") if same_boot else payload.lat
+    boot_origin_lon = prev.get("boot_origin_lon") if same_boot else payload.lon
+    boot_origin_seen = prev.get("boot_origin_seen") if same_boot else now_ts
     _device_heartbeats[key] = {
         "state": payload.state,
         "firmware_version": payload.firmware_version,
@@ -467,20 +479,24 @@ async def receive_heartbeat(payload: HeartbeatPayload):
         "gps_seen": payload.gps_seen,
         "gps_fixed": payload.gps_fixed,
         "boot_count": payload.boot_count,
+        "heartbeat_count": heartbeat_count,
+        "boot_origin_lat": boot_origin_lat,
+        "boot_origin_lon": boot_origin_lon,
+        "boot_origin_seen": boot_origin_seen,
         "free_heap": payload.free_heap,
         "battery_raw": payload.battery_raw,
         "factory_id": payload.factory_id,
         "lat": payload.lat,
         "lon": payload.lon,
         "satellites": payload.satellites,
-        "last_seen": time.time(),
+        "last_seen": now_ts,
         # 若已配對，附加 ringno1
         "ringno1": _nfc_pairings.get(key, {}).get("ringno1", ""),
     }
-    logger.info(f"[HEARTBEAT] {key} state={payload.state} ip={payload.ip} lat={payload.lat} lon={payload.lon}")
+    logger.info(f"[HEARTBEAT] {key} n={heartbeat_count} state={payload.state} ip={payload.ip} lat={payload.lat} lon={payload.lon}")
     # 即時廣播到 WebSocket 訂閱者
     await _ws_broadcast({"type": "heartbeat", "device_id": key, **_device_heartbeats[key], "last_seen_iso": datetime.fromtimestamp(_device_heartbeats[key]["last_seen"]).strftime("%Y-%m-%d %H:%M:%S")})
-    return {"status": "ok", "device_id": key}
+    return {"status": "ok", "device_id": key, "heartbeat_count": heartbeat_count}
 
 @app.post("/api/v1/devices/nfc_pair")
 def nfc_pair(payload: NfcPairPayload):

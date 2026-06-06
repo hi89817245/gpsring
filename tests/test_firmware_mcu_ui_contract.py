@@ -3,6 +3,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MAIN_CPP = ROOT / "firmware" / "gpsring_factory" / "src" / "main.cpp"
 OTG_HTML = ROOT / "otg.html"
+INDEX_HTML = ROOT / "index.html"
+INGEST_SERVER = ROOT / "ingest_server.py"
 
 
 def read_main() -> str:
@@ -11,6 +13,14 @@ def read_main() -> str:
 
 def read_otg() -> str:
     return OTG_HTML.read_text(encoding="utf-8")
+
+
+def read_index() -> str:
+    return INDEX_HTML.read_text(encoding="utf-8")
+
+
+def read_ingest() -> str:
+    return INGEST_SERVER.read_text(encoding="utf-8")
 
 
 def test_firmware_has_real_init_state_and_boots_to_init_before_gps_classification():
@@ -40,6 +50,10 @@ def test_led_has_disable_override_and_ui_no_longer_promises_unreliable_direct_on
     assert "bootLedSelfTest" in src
     assert "0.25s ON/OFF/ON/OFF before WiFi" in src
     assert "forceLedOff" in src
+    assert "GPIO_SWEEP_SAFE" in src
+    assert "LED_SELFTEST" in src
+    assert "GPIO_SWEEP_SAFE_PINS" in src
+    assert "excluded=GPIO0/2/8/9/12-21" in src
     html = read_otg()
     assert "LED_DISABLE" in html
     assert "LED_ENABLE" in html
@@ -65,3 +79,16 @@ def test_ringops_has_help_tooltips_and_api_quick_reference():
         assert endpoint in html
     for tooltip in ["title=\"只連接 Web Serial", "title=\"對已上線 MCU 執行 HTTP OTA", "title=\"清除 NVS"]:
         assert tooltip in html
+
+
+def test_live_map_shows_mac_heartbeat_count_boot_origin_and_tracks_unfixed_points():
+    html = read_index()
+    api = read_ingest()
+    assert "MAC:" in html
+    assert "heartbeat_count" in html
+    assert "boot_origin_lat" in html and "boot_origin_lon" in html
+    assert "MCU 開機原點" in html
+    assert "不再只等 gps_fixed" in html
+    assert "heartbeat_count" in api
+    assert "boot_origin_lat" in api and "boot_origin_lon" in api
+    assert "same_boot" in api

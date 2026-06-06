@@ -394,54 +394,99 @@ window.onerror = function(message, source, lineno, colno, error) {
         // ── Live GPS 鴿環圖層 ──
         const liveGpsGroup = L.layerGroup().addTo(map);
         const liveGpsMarkers = {}; // key=device_id
+        const liveGpsOriginMarkers = {}; // key=device_id → MCU 開機原點
         const liveGpsTracks = {}; // key=device_id → L.polyline
         const liveGpsTrackPoints = {}; // key=device_id → [[lat,lon],...]
+        const liveGpsLastHeartbeat = {}; // key=device_id → heartbeat_count
         const MAX_TRACK_POINTS = 500; // 每裝置最多留 500 個軌跡點
         const LIVE_GPS_ICON = {
-          standby:       "🟡", gps_searching: "🔵", gps_fixed: "🟢",
+          init:          "🟣", standby:       "🟡", gps_searching: "🔵", gps_fixed: "🟢",
           caring:        "🟠", racing:        "🔴"
         };
 
+        function validLatLon(lat, lon) {
+          return Number.isFinite(lat) && Number.isFinite(lon) && !(lat === 0 && lon === 0);
+        }
+        function pointChanged(a, b) {
+          if (!a || !b) return true;
+          return Math.abs(a[0] - b[0]) > 0.000001 || Math.abs(a[1] - b[1]) > 0.000001;
+        }
+        function ensureBootOrigin(dev) {
+          const key = dev.device_id || dev.mac || 'unknown';
+          const lat = parseFloat(dev.boot_origin_lat ?? dev.lat);
+          const lon = parseFloat(dev.boot_origin_lon ?? dev.lon);
+          if (!validLatLon(lat, lon)) return;
+          const n = dev.heartbeat_count || 1;
+          const popup = `<b>MCU 開機原點</b><br>` +
+            `Device: ${dev.device_id}<br>` +
+            `MAC: ${dev.mac || '-'}<br>` +
+            `FID: ${dev.factory_id || '-'}<br>` +
+            `目前已回報: 第 ${n} 次座標`;
+          if (liveGpsOriginMarkers[key]) {
+            liveGpsOriginMarkers[key].setLatLng([lat, lon]).setPopupContent(popup);
+          } else {
+            const origin = L.circleMarker([lat, lon], {
+              radius: 7, color: '#facc15', fillColor: '#facc15', fillOpacity: 0.55,
+              weight: 2, dashArray: '3,3'
+            }).bindPopup(popup).bindTooltip(`MCU開機原點｜${dev.mac || key}`, {direction:'top'});
+            liveGpsGroup.addLayer(origin);
+            liveGpsOriginMarkers[key] = origin;
+          }
+        }
+
         function applyDeviceUpdate(dev) {
-          if (!dev.lat || !dev.lon || (dev.lat === 0 && dev.lon === 0)) return;
+          const key = dev.device_id || dev.mac || 'unknown';
+          const lat = parseFloat(dev.lat);
+          const lon = parseFloat(dev.lon);
+          if (!validLatLon(lat, lon)) return;
           const icon = LIVE_GPS_ICON[dev.state] || "⚫";
-          const label = `${icon} ${dev.device_id.slice(-8)}<br>` +
-            `<small>${dev.ringno1 || dev.factory_id || '-'} ｜ ${dev.firmware_version}</small>`;
+          const n = dev.heartbeat_count || liveGpsLastHeartbeat[key] || 1;
+          const label = `${icon} ${String(key).slice(-8)}<br>` +
+            `<small>MAC ${dev.mac || '-'} ｜ 第 ${n} 次回報</small>`;
           const popup = `<b>${dev.device_id}</b><br>` +
+            `MAC: ${dev.mac || '-'}<br>` +
             `狀態: ${dev.state} | 在線: ${dev.online !== false ? '✅' : '❌'}<br>` +
             `環號: ${dev.ringno1 || '未配對'} | fid: ${dev.factory_id}<br>` +
             `GPS: ${dev.gps_fixed ? '定位✅' : '搜尋中'} (${dev.satellites || 0}顆)<br>` +
+            `回報: 第 ${n} 次座標 | 開機: #${dev.boot_count ?? '-'}<br>` +
+            `座標: ${lat.toFixed(6)}, ${lon.toFixed(6)}<br>` +
             `版本: ${dev.firmware_version} | IP: ${dev.ip}<br>` +
             `最後心跳: ${dev.last_seen_iso}`;
-          if (liveGpsMarkers[dev.device_id]) {
-            liveGpsMarkers[dev.device_id].setLatLng([dev.lat, dev.lon])
+          ensureBootOrigin(dev);
+          if (liveGpsMarkers[key]) {
+            liveGpsMarkers[key].setLatLng([lat, lon])
               .setPopupContent(popup).setOpacity(dev.online !== false ? 1 : 0.4);
             // 更新圖示 emoji（state 可能改變）
-            liveGpsMarkers[dev.device_id].setIcon(
+            liveGpsMarkers[key].setIcon(
               L.divIcon({ className:'', html:`<div style="font-size:22px;line-height:1">${icon}</div>`, iconSize:[28,28], iconAnchor:[14,14] })
             );
           } else {
-            const mk = L.marker([dev.lat, dev.lon], {
+            const mk = L.marker([lat, lon], {
               icon: L.divIcon({ className:'', html:`<div style="font-size:22px;line-height:1">${icon}</div>`, iconSize:[28,28], iconAnchor:[14,14] })
             }).bindPopup(popup).bindTooltip(label, {permanent:false, direction:'top'});
             liveGpsGroup.addLayer(mk);
-            liveGpsMarkers[dev.device_id] = mk;
+            liveGpsMarkers[key] = mk;
             mk.setOpacity(dev.online !== false ? 1 : 0.4);
           }
-          // 軌跡點留存（只有 GPS 定位時才記錄）
-          if (dev.gps_fixed) {
-            if (!liveGpsTrackPoints[dev.device_id]) liveGpsTrackPoints[dev.device_id] = [];
-            const pts = liveGpsTrackPoints[dev.device_id];
-            pts.push([dev.lat, dev.lon]);
-            if (pts.length > MAX_TRACK_POINTS) pts.shift();
-            if (liveGpsTracks[dev.device_id]) {
-              liveGpsTracks[dev.device_id].setLatLngs(pts);
-            } else {
-              const trkColor = dev.state === 'racing' ? '#f87171' : '#34d399';
-              const trk = L.polyline(pts, { color: trkColor, weight: 2, opacity: 0.7 });
-              liveGpsGroup.addLayer(trk);
-              liveGpsTracks[dev.device_id] = trk;
-            }
+          // 軌跡點留存：不再只等 gps_fixed。只要 MCU 回報有效座標且座標有變，就記錄。
+          if (!liveGpsTrackPoints[key]) liveGpsTrackPoints[key] = [];
+          const pts = liveGpsTrackPoints[key];
+          const bootLat = parseFloat(dev.boot_origin_lat ?? lat);
+          const bootLon = parseFloat(dev.boot_origin_lon ?? lon);
+          if (pts.length === 0 && validLatLon(bootLat, bootLon)) pts.push([bootLat, bootLon]);
+          const last = pts[pts.length - 1];
+          if (pointChanged(last, [lat, lon]) || n !== liveGpsLastHeartbeat[key]) {
+            pts.push([lat, lon]);
+            liveGpsLastHeartbeat[key] = n;
+          }
+          while (pts.length > MAX_TRACK_POINTS) pts.shift();
+          if (liveGpsTracks[key]) {
+            liveGpsTracks[key].setLatLngs(pts);
+          } else {
+            const trkColor = dev.gps_fixed ? '#34d399' : '#a78bfa';
+            const trk = L.polyline(pts, { color: trkColor, weight: 2.5, opacity: 0.78, dashArray: dev.gps_fixed ? null : '4,6' });
+            liveGpsGroup.addLayer(trk);
+            liveGpsTracks[key] = trk;
           }
         }
 
